@@ -85,7 +85,7 @@ export function Hero() {
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
         >
-          <source src="https://raw.githubusercontent.com/davysn-cloud/kairos-landingpage/main/attached_assets/videoplayback.webm" type="video/webm" />
+          <source src="/videoplayback.webm" type="video/webm" />
         </video>
 
         {/* Dark overlay for readability */}
