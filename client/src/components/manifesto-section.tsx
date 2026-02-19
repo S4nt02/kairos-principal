@@ -61,7 +61,7 @@ export function ManifestoSection() {
           playsInline
           className="absolute inset-0 w-full h-full object-cover"
         >
-          <source src="/videoplayback.mp4" type="video/mp4" />
+          <source src="https://raw.githubusercontent.com/davysn-cloud/kairos-landingpage/main/attached_assets/videoplayback.mp4" type="video/mp4" />
         </video>
         {/* Dark overlay — darker on mobile for readability in bright environments */}
         <div className="absolute inset-0 bg-black/65 md:bg-black/55" />
