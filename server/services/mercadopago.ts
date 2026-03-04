@@ -95,19 +95,30 @@ export async function createPreference(input: CreatePreferenceInput) {
 
   if (!isLocalDev) {
     // auto_return requires back_urls to be publicly accessible (not localhost)
-    preferenceBody.auto_return = "approved";
+    preferenceBody.auto_return = "all";
     preferenceBody.notification_url = `${SITE_URL}/api/webhooks/mercadopago`;
     preferenceBody.expires = true;
     preferenceBody.expiration_date_to = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   }
 
-  console.log("[MercadoPago] Creating preference for order:", orderId, "| isLocal:", isLocalDev);
+  // Detect sandbox mode: test tokens start with APP_USR- or TEST-
+  const mpToken = process.env.MP_ACCESS_TOKEN || "";
+  const isSandbox = mpToken.startsWith("TEST-") || mpToken.startsWith("APP_USR-");
+
+  console.log("[MercadoPago] Creating preference for order:", orderId, "| isLocal:", isLocalDev, "| sandbox:", isSandbox);
 
   const result = await preferenceClient.create({ body: preferenceBody as any });
 
+  // Return the correct checkout URL based on environment
+  // In sandbox, initPoint goes to production (broken with test token)
+  // sandboxInitPoint goes to sandbox (correct for testing)
+  const checkoutUrl = isSandbox
+    ? (result.sandbox_init_point || result.init_point!)
+    : result.init_point!;
+
   return {
     preferenceId: result.id!,
-    initPoint: result.init_point!,
+    initPoint: checkoutUrl,
     sandboxInitPoint: result.sandbox_init_point!,
   };
 }
