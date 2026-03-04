@@ -13,7 +13,7 @@
  */
 
 import { storage } from "../storage";
-import type { CartItem } from "@shared/schema";
+import type { CartItem } from "../../shared/schema";
 
 // ── Config ──
 

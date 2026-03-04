@@ -8,7 +8,7 @@ import {
   users, categories, products, productVariants,
   paperTypes, finishings, priceRules,
   cartItems, orders, orderItems,
-} from "@shared/schema";
+} from "../shared/schema";
 import { db } from "./db";
 import { eq, and, asc, desc } from "drizzle-orm";
 

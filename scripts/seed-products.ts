@@ -13,7 +13,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import {
   categories, products, paperTypes, finishings,
-  productVariants, priceRules,
+  productVariants, priceRules, orderItems, orders, cartItems,
 } from "../shared/schema";
 
 const { Pool } = pg;
@@ -65,6 +65,9 @@ async function seed() {
 
   // Clear existing data in reverse dependency order
   console.log("Clearing existing data...");
+  await db.delete(orderItems);
+  await db.delete(orders);
+  await db.delete(cartItems);
   await db.delete(priceRules);
   await db.delete(productVariants);
   await db.delete(products);

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { randomUUID } from "crypto";
-import type { CategoryWithCount, CategoryWithProducts, ProductWithDetails } from "@shared/types";
+import type { CategoryWithCount, CategoryWithProducts, ProductWithDetails } from "../shared/types";
 import {
   validate, addCartItemSchema, updateCartItemSchema,
   checkoutSchema, updateStatusSchema,
