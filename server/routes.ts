@@ -213,41 +213,6 @@ export async function registerRoutes(
     res.json(updated);
   });
 
-  // ── Debug MP (TEMPORARY) ──
-  app.get("/api/debug/mp", async (_req, res) => {
-    const mpToken = process.env.MP_ACCESS_TOKEN || "";
-    const siteUrl = (process.env.SITE_URL || "http://localhost:5000").replace(/\/+$/, "");
-    const isLocalDev = siteUrl.includes("localhost") || siteUrl.includes("127.0.0.1");
-    const isSandbox = mpToken.startsWith("TEST-") || mpToken.startsWith("APP_USR-");
-    try {
-      const preference = await createPreference({
-        orderId: "test-debug-" + Date.now(),
-        items: [{ id: "test", title: "Produto Teste", quantity: 1, unit_price: 10.00 }],
-        shippingCost: 0,
-        payer: { name: "Test", email: "test@test.com" },
-      });
-      res.json({
-        siteUrl,
-        isLocalDev,
-        isSandbox,
-        mpTokenPrefix: mpToken.substring(0, 15),
-        preferenceId: preference.preferenceId,
-        initPoint: preference.initPoint,
-        sandboxInitPoint: preference.sandboxInitPoint,
-      });
-    } catch (err: any) {
-      res.json({
-        siteUrl,
-        isLocalDev,
-        isSandbox,
-        mpTokenPrefix: mpToken.substring(0, 15),
-        error: err?.message,
-        cause: err?.cause ? JSON.stringify(err.cause).substring(0, 500) : undefined,
-        status: err?.status,
-      });
-    }
-  });
-
   // ── Shipping ──
 
   app.post("/api/grafica/shipping/quote", async (req, res) => {
