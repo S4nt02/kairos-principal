@@ -1,12 +1,7 @@
 {
-  "buildCommand": "npx vite build",
+  "buildCommand": "npx vite build && node scripts/build-api.mjs",
   "outputDirectory": "dist/public",
   "framework": null,
-  "functions": {
-    "api/index.ts": {
-      "includeFiles": "{server,shared}/**"
-    }
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
