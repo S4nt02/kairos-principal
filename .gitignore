@@ -8,3 +8,4 @@ vite.config.ts.*
 *.tar.gz
 client/public/videoplayback.mp4
 api/index.mjs
+.vercel

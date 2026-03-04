@@ -19,7 +19,9 @@ import type { CartItem } from "../../shared/schema";
 
 const MELHOR_ENVIO_TOKEN = process.env.MELHOR_ENVIO_TOKEN || "";
 const WAREHOUSE_CEP = process.env.WAREHOUSE_CEP || "01001000";
-const BASE_URL = MELHOR_ENVIO_TOKEN.startsWith("sandbox")
+const IS_SANDBOX = process.env.MELHOR_ENVIO_SANDBOX === "true"
+  || MELHOR_ENVIO_TOKEN.startsWith("sandbox");
+const BASE_URL = IS_SANDBOX
   ? "https://sandbox.melhorenvio.com.br"
   : "https://api.melhorenvio.com.br";
 
@@ -152,6 +154,9 @@ export async function calculateShipping(
     console.log("[Shipping] No MELHOR_ENVIO_TOKEN set, returning mock quotes");
     return MOCK_QUOTES;
   }
+
+  console.log(`[Shipping] Using ${IS_SANDBOX ? "SANDBOX" : "PRODUCTION"} API: ${BASE_URL}`);
+  console.log(`[Shipping] Token present: ${MELHOR_ENVIO_TOKEN.length} chars, starts with: ${MELHOR_ENVIO_TOKEN.substring(0, 8)}...`);
 
   const pkg = await calculatePackage(input.items);
 

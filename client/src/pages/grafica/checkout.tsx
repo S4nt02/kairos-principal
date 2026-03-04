@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
@@ -10,6 +10,7 @@ import { Link } from "wouter";
 import { GraficaNavbar } from "@/components/grafica/grafica-navbar";
 import { Footer } from "@/components/layout";
 import { useCart } from "@/hooks/use-cart";
+import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/grafica/price-engine";
 import { apiRequest } from "@/lib/queryClient";
 import type { ShippingQuote } from "@shared/types";
@@ -37,6 +38,7 @@ interface AddressForm {
 export default function GraficaCheckout() {
   const [, setLocation] = useLocation();
   const { cart, sessionId, isLoading: cartLoading } = useCart();
+  const { isAuthenticated, customer } = useAuth();
   const [step, setStep] = useState<Step>("address");
   const [address, setAddress] = useState<AddressForm>({
     cep: "", street: "", number: "", complement: "",
@@ -45,6 +47,22 @@ export default function GraficaCheckout() {
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLocation("/grafica/login?redirect=/grafica/checkout");
+    }
+  }, [isAuthenticated, setLocation]);
+
+  // Pre-fill customer data from auth
+  useEffect(() => {
+    if (customer) {
+      if (!customerName) setCustomerName(customer.name);
+      if (!customerEmail) setCustomerEmail(customer.email);
+      if (!customerPhone && customer.phone) setCustomerPhone(customer.phone);
+    }
+  }, [customer]);
   const [selectedShipping, setSelectedShipping] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [lookingUpCep, setLookingUpCep] = useState(false);

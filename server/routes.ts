@@ -6,7 +6,10 @@ import type { CategoryWithCount, CategoryWithProducts, ProductWithDetails } from
 import {
   validate, addCartItemSchema, updateCartItemSchema,
   checkoutSchema, updateStatusSchema,
+  registerSchema, loginSchema,
 } from "./middleware/validate";
+import { requireAuth, optionalAuth } from "./middleware/auth";
+import { hashPassword, verifyPassword, generateToken } from "./services/auth";
 import {
   createPreference, getPayment,
   mapPaymentStatus, mapPaymentMethod,
@@ -16,6 +19,7 @@ import {
   addToMelhorEnvioCart, checkoutShipment, generateLabel, getLabelUrl,
   calculatePackage,
 } from "./services/shipping";
+import { registerAdminRoutes } from "./routes/admin";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -268,9 +272,61 @@ export async function registerRoutes(
     }
   });
 
+  // ── Auth Routes ──
+
+  app.post("/api/grafica/auth/register", validate(registerSchema), async (req, res) => {
+    const { name, email, phone, password } = req.body;
+
+    const existing = await storage.getCustomerByEmail(email);
+    if (existing) {
+      res.status(409).json({ message: "E-mail já cadastrado" });
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    const customer = await storage.createCustomer({ name, email, phone: phone || null, passwordHash });
+    const token = generateToken(customer.id);
+
+    res.status(201).json({
+      token,
+      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone },
+    });
+  });
+
+  app.post("/api/grafica/auth/login", validate(loginSchema), async (req, res) => {
+    const { email, password } = req.body;
+
+    const customer = await storage.getCustomerByEmail(email);
+    if (!customer) {
+      res.status(401).json({ message: "E-mail ou senha incorretos" });
+      return;
+    }
+
+    const valid = await verifyPassword(password, customer.passwordHash);
+    if (!valid) {
+      res.status(401).json({ message: "E-mail ou senha incorretos" });
+      return;
+    }
+
+    const token = generateToken(customer.id);
+    res.json({
+      token,
+      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone },
+    });
+  });
+
+  app.get("/api/grafica/auth/me", requireAuth, async (req, res) => {
+    const customer = await storage.getCustomer(req.customerId!);
+    if (!customer) {
+      res.status(404).json({ message: "Cliente não encontrado" });
+      return;
+    }
+    res.json({ id: customer.id, name: customer.name, email: customer.email, phone: customer.phone });
+  });
+
   // ── Checkout ──
 
-  app.post("/api/grafica/checkout", validate(checkoutSchema), async (req, res) => {
+  app.post("/api/grafica/checkout", requireAuth, validate(checkoutSchema), async (req, res) => {
     const { sessionId, customerName, customerEmail, customerPhone, address, shippingOption, notes } = req.body;
 
     const cartItemsList = await storage.getCartItems(sessionId);
@@ -286,8 +342,11 @@ export async function registerRoutes(
     const shippingCost = shippingOption?.price || 0;
     const total = subtotal + shippingCost;
 
+    // Store sessionId in notes so webhook can clear cart after payment approval
+    const orderNotes = [notes, `__sessionId:${sessionId}`].filter(Boolean).join("\n");
+
     const order = await storage.createOrder({
-      customerId: "guest",
+      customerId: req.customerId!,
       status: "pending",
       addressId: null,
       subtotal: subtotal.toFixed(2),
@@ -298,7 +357,7 @@ export async function registerRoutes(
       paymentExternalId: null,
       mpPreferenceId: null,
       shippingTrackingCode: null,
-      notes: notes || null,
+      notes: orderNotes,
     });
 
     // Resolve product names
@@ -321,7 +380,7 @@ export async function registerRoutes(
     }));
 
     await storage.addOrderItems(orderItemsData);
-    await storage.clearCart(sessionId);
+    // Cart is NOT cleared here — it will be cleared in the webhook when payment is approved
 
     // Create MercadoPago Checkout Pro preference
     try {
@@ -387,111 +446,13 @@ export async function registerRoutes(
 
   // ── Account (Customer) ──
 
-  app.get("/api/grafica/account/orders", async (_req, res) => {
-    // In MVP, return all guest orders. In production, filter by authenticated customer.
-    const orders = await storage.getOrdersByCustomer("guest");
+  app.get("/api/grafica/account/orders", requireAuth, async (req, res) => {
+    const orders = await storage.getOrdersByCustomer(req.customerId!);
     res.json(orders);
   });
 
-  // ── Admin Routes ──
-
-  app.get("/api/grafica/admin/orders", async (_req, res) => {
-    // Return all orders (in production, guard with admin auth middleware)
-    const allCategories = await storage.getCategories();
-    const allProductArrays = await Promise.all(
-      allCategories.map((c) => storage.getProductsByCategory(c.id)),
-    );
-    const allOrders = await storage.getOrdersByCustomer("guest");
-    res.json(allOrders);
-  });
-
-  app.patch("/api/grafica/admin/orders/:id/tracking", async (req, res) => {
-    const { trackingCode } = req.body;
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido não encontrado" });
-      return;
-    }
-    // Update tracking code directly on the order object (MemStorage)
-    (order as any).shippingTrackingCode = trackingCode;
-    res.json(order);
-  });
-
-  // ── Admin: Generate Shipping Label ──
-
-  app.post("/api/grafica/admin/orders/:id/generate-label", async (req, res) => {
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido não encontrado" });
-      return;
-    }
-
-    const { melhorEnvioServiceId, address } = req.body;
-    if (!melhorEnvioServiceId || !address) {
-      res.status(400).json({ message: "melhorEnvioServiceId e address são obrigatórios" });
-      return;
-    }
-
-    try {
-      const orderItemsList = await storage.getOrderItems(order.id);
-      // Build a minimal CartItem-like array for package calculation
-      const fakeCartItems = orderItemsList.map((oi) => ({
-        id: oi.id,
-        sessionId: "",
-        productId: oi.productId,
-        variantId: oi.variantId,
-        quantity: oi.quantity,
-        unitPrice: oi.unitPrice,
-        specifications: oi.specifications,
-        artFileUrl: oi.artFileUrl,
-        createdAt: new Date(),
-      }));
-
-      const pkg = await calculatePackage(fakeCartItems);
-      const insuredValue = parseFloat(order.total);
-
-      // 1. Add to ME cart
-      const { cartItemId } = await addToMelhorEnvioCart({
-        melhorEnvioServiceId,
-        fromCep: process.env.WAREHOUSE_CEP || "01001000",
-        toCep: address.cep,
-        toName: address.name || "Cliente",
-        toAddress: address.street,
-        toNumber: address.number,
-        toComplement: address.complement,
-        toNeighborhood: address.neighborhood,
-        toCity: address.city,
-        toState: address.state,
-        pkg,
-        insuredValue,
-        orderId: order.id,
-      });
-
-      // 2. Checkout (purchase)
-      await checkoutShipment([cartItemId]);
-
-      // 3. Generate label
-      await generateLabel([cartItemId]);
-
-      // 4. Get label URL
-      const { url } = await getLabelUrl([cartItemId]);
-
-      res.json({ labelUrl: url, cartItemId });
-    } catch (err: any) {
-      console.error("[Admin] Label generation failed:", err?.message || err);
-      res.status(500).json({ message: err?.message || "Erro ao gerar etiqueta" });
-    }
-  });
-
-  app.patch("/api/grafica/admin/orders/:id/art-status", async (req, res) => {
-    const { orderItemId, artStatus } = req.body;
-    const item = await storage.updateOrderItemArt(orderItemId, "", artStatus);
-    if (!item) {
-      res.status(404).json({ message: "Item não encontrado" });
-      return;
-    }
-    res.json(item);
-  });
+  // ── Admin Routes (protected, in separate file) ──
+  registerAdminRoutes(app);
 
   // ── Webhook: MercadoPago ──
   // Official docs: https://www.mercadopago.com.br/developers/en/docs/your-integrations/notifications/webhooks
@@ -539,6 +500,15 @@ export async function registerRoutes(
         await storage.updatePaymentStatus(orderId, paymentStatus, paymentId);
         await storage.updateOrderStatus(orderId, orderStatus);
         console.log(`[Webhook] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}, method=${resolvedPaymentMethod}`);
+
+        // Clear cart when payment is approved
+        if (paymentStatus === "approved" && order.notes) {
+          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
+          if (sessionMatch) {
+            await storage.clearCart(sessionMatch[1]);
+            console.log(`[Webhook] Cart cleared for session ${sessionMatch[1]}`);
+          }
+        }
       }
 
       res.status(200).json({ received: true, processed: true });

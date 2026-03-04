@@ -16,7 +16,9 @@ const GraficaCarrinho = lazy(() => import("./pages/grafica/carrinho"));
 const GraficaCheckout = lazy(() => import("./pages/grafica/checkout"));
 const GraficaPedido = lazy(() => import("./pages/grafica/pedido"));
 const GraficaConta = lazy(() => import("./pages/grafica/conta"));
-const GraficaAdmin = lazy(() => import("./pages/grafica/admin"));
+const GraficaLogin = lazy(() => import("./pages/grafica/login"));
+const AdminLogin = lazy(() => import("./pages/admin/login"));
+const AdminLayout = lazy(() => import("./pages/admin/layout"));
 
 function GraficaLoading() {
   return (
@@ -67,14 +69,19 @@ function Router() {
           </Suspense>
         )}
       </Route>
+      <Route path="/grafica/login">
+        <Suspense fallback={<GraficaLoading />}>
+          <GraficaLogin />
+        </Suspense>
+      </Route>
       <Route path="/grafica/conta">
         <Suspense fallback={<GraficaLoading />}>
           <GraficaConta />
         </Suspense>
       </Route>
-      <Route path="/grafica/admin">
+      <Route path="/admin" nest>
         <Suspense fallback={<GraficaLoading />}>
-          <GraficaAdmin />
+          <AdminLayout />
         </Suspense>
       </Route>
       <Route path="/grafica/:slug">

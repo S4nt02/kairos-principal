@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowLeft, ChevronRight, ShoppingCart } from "lucide-react";
+import { ArrowLeft, ChevronRight, ShoppingCart, User } from "lucide-react";
 import { useCart } from "@/hooks/use-cart";
+import { useAuth } from "@/hooks/use-auth";
 import { CartDrawer } from "./cart-drawer";
 
 interface BreadcrumbItem {
@@ -17,6 +18,7 @@ interface GraficaNavbarProps {
 export function GraficaNavbar({ breadcrumbs = [] }: GraficaNavbarProps) {
   const [location] = useLocation();
   const { itemCount } = useCart();
+  const { isAuthenticated, customer } = useAuth();
   const [cartOpen, setCartOpen] = useState(false);
 
   const allCrumbs: BreadcrumbItem[] = [
@@ -74,8 +76,22 @@ export function GraficaNavbar({ breadcrumbs = [] }: GraficaNavbarProps) {
             })}
           </div>
 
-          {/* Right: cart + contact */}
-          <div className="flex items-center gap-4">
+          {/* Right: auth + cart */}
+          <div className="flex items-center gap-3">
+            {isAuthenticated ? (
+              <Link href="/grafica/conta">
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+                  <User className="w-4 h-4" />
+                  <span className="hidden sm:inline">{customer?.name?.split(" ")[0]}</span>
+                </span>
+              </Link>
+            ) : (
+              <Link href="/grafica/login">
+                <span className="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer hidden sm:inline">
+                  Entrar
+                </span>
+              </Link>
+            )}
             <button
               onClick={() => setCartOpen(true)}
               className="relative p-2 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
@@ -87,12 +103,6 @@ export function GraficaNavbar({ breadcrumbs = [] }: GraficaNavbarProps) {
                 </span>
               )}
             </button>
-            <a
-              href="mailto:contato@kairos.com"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors hidden sm:inline"
-            >
-              Contato
-            </a>
           </div>
         </motion.div>
       </div>

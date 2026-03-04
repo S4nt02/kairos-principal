@@ -1,15 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
-  Package, Clock, CheckCircle, Truck, MapPin, User,
-  ChevronRight, Eye, ArrowLeft,
+  Package, User, LogOut,
+  ChevronRight, ArrowLeft,
 } from "lucide-react";
 import { Link } from "wouter";
 import { GraficaNavbar } from "@/components/grafica/grafica-navbar";
 import { Footer } from "@/components/layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/grafica/price-engine";
+import { useAuth } from "@/hooks/use-auth";
+import { apiRequest } from "@/lib/queryClient";
 import type { Order } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -28,16 +31,31 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 
 export default function GraficaConta() {
   const [tab, setTab] = useState<Tab>("orders");
+  const [, setLocation] = useLocation();
+  const { isAuthenticated, customer, logout } = useAuth();
 
-  // For the MVP, fetch orders for "guest" customer
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLocation("/grafica/login?redirect=/grafica/conta");
+    }
+  }, [isAuthenticated, setLocation]);
+
   const { data: orders, isLoading } = useQuery<Order[]>({
     queryKey: ["/api/grafica/account/orders"],
     queryFn: async () => {
-      const res = await fetch("/api/grafica/account/orders", { credentials: "include" });
-      if (!res.ok) return [];
+      const res = await apiRequest("GET", "/api/grafica/account/orders");
       return res.json();
     },
+    enabled: isAuthenticated,
   });
+
+  const handleLogout = () => {
+    logout();
+    setLocation("/grafica");
+  };
+
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-background font-sans">
@@ -58,6 +76,9 @@ export default function GraficaConta() {
           className="mb-8"
         >
           <h1 className="text-3xl font-display font-bold tracking-tight">Minha Conta</h1>
+          {customer && (
+            <p className="text-muted-foreground mt-1">Olá, {customer.name.split(" ")[0]}</p>
+          )}
         </motion.div>
 
         {/* Tabs */}
@@ -164,16 +185,34 @@ export default function GraficaConta() {
           >
             <div className="rounded-xl border border-border/50 p-6 space-y-6">
               <h2 className="font-display font-bold text-lg">Informações Pessoais</h2>
-              <p className="text-sm text-muted-foreground">
-                O sistema de contas será habilitado em breve. Por enquanto, seus pedidos são
-                rastreados pela sessão do navegador.
-              </p>
 
-              <div className="rounded-lg border border-dashed border-border/50 p-6 text-center">
-                <User className="w-10 h-10 text-muted-foreground/20 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">
-                  Login e cadastro de clientes em breve
-                </p>
+              {customer && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-muted-foreground">Nome</label>
+                    <p className="text-sm font-medium">{customer.name}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground">E-mail</label>
+                    <p className="text-sm font-medium">{customer.email}</p>
+                  </div>
+                  {customer.phone && (
+                    <div>
+                      <label className="text-xs text-muted-foreground">Telefone</label>
+                      <p className="text-sm font-medium">{customer.phone}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-2">
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-red-600 hover:bg-red-500/10 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sair da conta
+                </button>
               </div>
             </div>
           </motion.div>

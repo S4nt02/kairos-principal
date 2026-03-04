@@ -1,4 +1,4 @@
-import type { Category, Product, PaperType, Finishing, ProductVariant, PriceRule, CartItem, Order, OrderItem, Address } from "./schema";
+import type { Category, Product, PaperType, Finishing, ProductVariant, PriceRule, CartItem, Order, OrderItem, Address, AdminUser, Customer } from "./schema";
 
 export interface PriceRange {
   min: number;
@@ -63,4 +63,89 @@ export interface CheckoutData {
   shippingOption: ShippingQuote;
   paymentMethod: "pix" | "boleto" | "card";
   notes?: string;
+}
+
+// ── Admin Types ──
+
+export type AdminRole = "admin" | "operador" | "financeiro";
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface DashboardKPIs {
+  revenue: number;
+  revenueChange: number;
+  orders: number;
+  ordersChange: number;
+  newCustomers: number;
+  newCustomersChange: number;
+  avgTicket: number;
+  avgTicketChange: number;
+}
+
+export interface RevenueDataPoint {
+  date: string;
+  revenue: number;
+}
+
+export interface OrderStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface TopProduct {
+  productId: string;
+  productName: string;
+  revenue: number;
+  quantity: number;
+}
+
+export interface FinancialReport {
+  period: string;
+  revenue: number;
+  orders: number;
+  avgTicket: number;
+  margin: number;
+  change: number;
+}
+
+export interface PaymentStatusBreakdown {
+  status: string;
+  count: number;
+  total: number;
+}
+
+export interface AdminUserInfo {
+  id: string;
+  email: string;
+  displayName: string;
+  role: AdminRole;
+  active: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiConnectionStatus {
+  service: string;
+  connected: boolean;
+  details?: string;
+}
+
+export interface AdminOrderDetail extends OrderWithItems {
+  customer?: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string | null;
+  };
+}
+
+export interface CustomerWithStats extends Customer {
+  orderCount: number;
+  totalSpent: number;
 }
