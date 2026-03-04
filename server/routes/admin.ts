@@ -654,21 +654,54 @@ export function registerAdminRoutes(app: Express) {
   app.get("/api/admin/settings/api-status", requireRole("admin"), async (_req, res) => {
     const statuses = [];
 
-    // MercadoPago (env var: MP_ACCESS_TOKEN)
-    statuses.push({
-      service: "MercadoPago",
-      connected: !!process.env.MP_ACCESS_TOKEN,
-      details: process.env.MP_ACCESS_TOKEN ? "Token configurado" : "Token não configurado",
-    });
+    // MercadoPago — test real connection
+    const mpToken = process.env.MP_ACCESS_TOKEN;
+    if (!mpToken) {
+      statuses.push({ service: "MercadoPago", connected: false, details: "MP_ACCESS_TOKEN não configurado" });
+    } else {
+      try {
+        const mpRes = await fetch("https://api.mercadopago.com/v1/payment_methods", {
+          headers: { Authorization: `Bearer ${mpToken}` },
+        });
+        if (mpRes.ok) {
+          statuses.push({ service: "MercadoPago", connected: true, details: `Conectado (${mpRes.status})` });
+        } else {
+          const body = await mpRes.text().catch(() => "");
+          statuses.push({ service: "MercadoPago", connected: false, details: `Erro ${mpRes.status}: ${body.slice(0, 120)}` });
+        }
+      } catch (err: any) {
+        statuses.push({ service: "MercadoPago", connected: false, details: `Falha na conexão: ${err?.message || err}` });
+      }
+    }
 
-    // Melhor Envio (env var: MELHOR_ENVIO_TOKEN)
-    statuses.push({
-      service: "Melhor Envio",
-      connected: !!process.env.MELHOR_ENVIO_TOKEN,
-      details: process.env.MELHOR_ENVIO_TOKEN
-        ? (process.env.MELHOR_ENVIO_TOKEN.startsWith("sandbox") ? "Sandbox" : "Produção")
-        : "Token não configurado",
-    });
+    // Melhor Envio — test real connection
+    const meToken = process.env.MELHOR_ENVIO_TOKEN;
+    if (!meToken) {
+      statuses.push({ service: "Melhor Envio", connected: false, details: "MELHOR_ENVIO_TOKEN não configurado" });
+    } else {
+      const isSandbox = process.env.MELHOR_ENVIO_SANDBOX === "true" || meToken.startsWith("sandbox");
+      const meBaseUrl = isSandbox ? "https://sandbox.melhorenvio.com.br" : "https://api.melhorenvio.com.br";
+      try {
+        const meRes = await fetch(`${meBaseUrl}/api/v2/me`, {
+          headers: {
+            Authorization: `Bearer ${meToken}`,
+            Accept: "application/json",
+            "User-Agent": "Kairos Grafica (contato@kairos.com.br)",
+          },
+        });
+        if (meRes.ok) {
+          const meData = await meRes.json().catch(() => ({})) as any;
+          const env = isSandbox ? "Sandbox" : "Produção";
+          statuses.push({ service: "Melhor Envio", connected: true, details: `${env} — ${meData?.firstname || "OK"} (${meRes.status})` });
+        } else {
+          const body = await meRes.text().catch(() => "");
+          const env = isSandbox ? "Sandbox" : "Produção";
+          statuses.push({ service: "Melhor Envio", connected: false, details: `${env} — Erro ${meRes.status}: ${body.slice(0, 120)}` });
+        }
+      } catch (err: any) {
+        statuses.push({ service: "Melhor Envio", connected: false, details: `Falha na conexão: ${err?.message || err}` });
+      }
+    }
 
     // Database
     try {
