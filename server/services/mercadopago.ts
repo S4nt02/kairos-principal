@@ -101,24 +101,13 @@ export async function createPreference(input: CreatePreferenceInput) {
     preferenceBody.expiration_date_to = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   }
 
-  // Detect sandbox mode: test tokens start with APP_USR- or TEST-
-  const mpToken = process.env.MP_ACCESS_TOKEN || "";
-  const isSandbox = mpToken.startsWith("TEST-") || mpToken.startsWith("APP_USR-");
-
-  console.log("[MercadoPago] Creating preference for order:", orderId, "| isLocal:", isLocalDev, "| sandbox:", isSandbox);
+  console.log("[MercadoPago] Creating preference for order:", orderId, "| isLocal:", isLocalDev);
 
   const result = await preferenceClient.create({ body: preferenceBody as any });
 
-  // Return the correct checkout URL based on environment
-  // In sandbox, initPoint goes to production (broken with test token)
-  // sandboxInitPoint goes to sandbox (correct for testing)
-  const checkoutUrl = isSandbox
-    ? (result.sandbox_init_point || result.init_point!)
-    : result.init_point!;
-
   return {
     preferenceId: result.id!,
-    initPoint: checkoutUrl,
+    initPoint: result.init_point!,
     sandboxInitPoint: result.sandbox_init_point!,
   };
 }
