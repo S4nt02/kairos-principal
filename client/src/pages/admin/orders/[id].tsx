@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, Save, Truck } from "lucide-react";
+import { ArrowLeft, Save, Truck, Printer } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import type { AdminOrderDetail } from "../../../../../shared/types";
@@ -181,6 +181,40 @@ export default function OrderDetail({ id }: { id: string }) {
               )}
             </CardContent>
           </Card>
+
+          {/* Shipping Label */}
+          {(order as any).shippingLabelUrl && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Etiqueta de Envio</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  className="w-full"
+                  onClick={() => window.open((order as any).shippingLabelUrl, "_blank")}
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Imprimir Etiqueta
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Shipping Address */}
+          {(order as any).shippingAddress && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Endereço de Entrega</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm space-y-1">
+                <p>{(order as any).shippingAddress.street}, {(order as any).shippingAddress.number}</p>
+                {(order as any).shippingAddress.complement && <p>{(order as any).shippingAddress.complement}</p>}
+                <p>{(order as any).shippingAddress.neighborhood}</p>
+                <p>{(order as any).shippingAddress.city} - {(order as any).shippingAddress.state}</p>
+                <p className="font-mono">{(order as any).shippingAddress.cep}</p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Tracking */}
           {canEdit && (

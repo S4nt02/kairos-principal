@@ -116,6 +116,9 @@ export interface IStorage {
   getPaymentStatusBreakdown(dateFrom: Date, dateTo: Date): Promise<{ status: string; count: number; total: number }[]>;
   getMonthlyComparison(months: number): Promise<{ period: string; revenue: number; orders: number; avgTicket: number }[]>;
 
+  // Shipping label
+  updateShippingLabel(id: string, labelUrl: string): Promise<Order | undefined>;
+
   // Admin: Order tracking
   updateOrderTracking(id: string, trackingCode: string): Promise<Order | undefined>;
 }
@@ -668,6 +671,15 @@ export class DatabaseStorage implements IStorage {
       orders: Number(r.orders),
       avgTicket: Number(r.avgTicket),
     }));
+  }
+
+  // ── Shipping label ──
+  async updateShippingLabel(id: string, labelUrl: string): Promise<Order | undefined> {
+    const [updated] = await db.update(orders)
+      .set({ shippingLabelUrl: labelUrl, updatedAt: new Date() })
+      .where(eq(orders.id, id))
+      .returning();
+    return updated;
   }
 
   // ── Admin: Order tracking ──

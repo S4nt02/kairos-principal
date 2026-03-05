@@ -18,6 +18,7 @@ import {
   calculateShipping,
   addToMelhorEnvioCart, checkoutShipment, generateLabel, getLabelUrl,
   calculatePackage,
+  autoGenerateLabel,
 } from "./services/shipping";
 import { registerAdminRoutes } from "./routes/admin";
 
@@ -357,8 +358,13 @@ export async function registerRoutes(
       paymentExternalId: null,
       mpPreferenceId: null,
       shippingTrackingCode: null,
+      shippingAddress: address || null,
+      shippingServiceId: shippingOption?.melhorEnvioId ?? null,
+      shippingLabelUrl: null,
       notes: orderNotes,
     });
+
+    console.log(`[Checkout] Order ${order.id} created: shippingAddress=${address ? 'yes' : 'no'}, shippingServiceId=${shippingOption?.melhorEnvioId ?? 'none'}`);
 
     // Resolve product names
     const allCats = await storage.getCategories();
@@ -509,6 +515,11 @@ export async function registerRoutes(
             console.log(`[Webhook] Cart cleared for session ${sessionMatch[1]}`);
           }
         }
+
+        // Auto-generate shipping label (fire-and-forget)
+        if (paymentStatus === "approved") {
+          autoGenerateLabel(orderId).catch(() => {});
+        }
       }
 
       res.status(200).json({ received: true, processed: true });
@@ -598,6 +609,11 @@ export async function registerRoutes(
           if (sessionMatch) {
             await storage.clearCart(sessionMatch[1]);
           }
+        }
+
+        // Auto-generate shipping label (fire-and-forget)
+        if (paymentStatus === "approved") {
+          autoGenerateLabel(orderId).catch(() => {});
         }
       }
 

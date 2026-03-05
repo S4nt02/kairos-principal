@@ -7,6 +7,7 @@ import {
   calculateShipping,
   addToMelhorEnvioCart, checkoutShipment, generateLabel, getLabelUrl,
   calculatePackage,
+  autoGenerateLabel,
 } from "../services/shipping";
 import { z } from "zod";
 
@@ -277,12 +278,19 @@ export function registerAdminRoutes(app: Express) {
   });
 
   app.patch("/api/admin/orders/:id/status", requireRole("admin", "operador"), validate(updateOrderStatusSchema), async (req, res) => {
-    const updated = await storage.updateOrderStatus(str(req.params.id), req.body.status);
+    const orderId = str(req.params.id);
+    const updated = await storage.updateOrderStatus(orderId, req.body.status);
     if (!updated) {
       res.status(404).json({ message: "Pedido não encontrado" });
       return;
     }
-    await audit(req.adminUserId!, "update_status", "order", str(req.params.id), { status: req.body.status });
+    await audit(req.adminUserId!, "update_status", "order", orderId, { status: req.body.status });
+
+    // Auto-generate shipping label when moving to confirmed/production and no label exists yet
+    if (["confirmed", "production"].includes(req.body.status) && !updated.shippingLabelUrl) {
+      autoGenerateLabel(orderId).catch(() => {});
+    }
+
     res.json(updated);
   });
 

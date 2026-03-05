@@ -13,7 +13,7 @@
  */
 
 import { storage } from "../storage";
-import type { CartItem } from "../../shared/schema";
+import type { CartItem, Order, OrderItem } from "../../shared/schema";
 
 // ── Config ──
 
@@ -390,4 +390,110 @@ export async function getLabelUrl(
 
   const data = (await response.json()) as { url: string };
   return { url: data.url };
+}
+
+// ── Auto Label Generation (triggered after payment approval) ──
+
+/**
+ * Automatically generates a shipping label after payment is approved.
+ * This is a fire-and-forget operation — errors are logged but don't block payment processing.
+ *
+ * Flow:
+ * 1. Fetch order + items from DB
+ * 2. Validate shipping data exists (address + serviceId)
+ * 3. Calculate package dimensions from order items
+ * 4. Add to Melhor Envio cart
+ * 5. Checkout (purchase) the shipment
+ * 6. Generate the label PDF
+ * 7. Get the printable label URL
+ * 8. Save label URL on order + move status to "production"
+ */
+export async function autoGenerateLabel(orderId: string): Promise<void> {
+  try {
+    console.log(`[AutoLabel] Starting label generation for order ${orderId}`);
+
+    // 1. Fetch order and items
+    const order = await storage.getOrder(orderId);
+    if (!order) {
+      console.error(`[AutoLabel] Order ${orderId} not found`);
+      return;
+    }
+
+    // 2. Validate shipping data
+    const addr = order.shippingAddress as { cep: string; street: string; number: string; complement?: string; neighborhood: string; city: string; state: string } | null;
+    const serviceId = order.shippingServiceId;
+
+    if (!addr || !serviceId) {
+      console.warn(`[AutoLabel] Order ${orderId} missing shipping data (address=${!!addr}, serviceId=${serviceId}). Skipping auto-label.`);
+      return;
+    }
+
+    if (!MELHOR_ENVIO_TOKEN) {
+      console.warn(`[AutoLabel] MELHOR_ENVIO_TOKEN not set. Skipping auto-label for order ${orderId}.`);
+      return;
+    }
+
+    // 3. Fetch order items and calculate package dimensions
+    const items = await storage.getOrderItems(orderId);
+    // Convert OrderItems to CartItem-like objects for calculatePackage
+    const cartLikeItems: CartItem[] = items.map((item) => ({
+      id: item.id,
+      sessionId: "",
+      productId: item.productId,
+      variantId: item.variantId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      specifications: item.specifications,
+      artFileUrl: item.artFileUrl,
+      createdAt: new Date(),
+    }));
+
+    const pkg = await calculatePackage(cartLikeItems);
+    const insuredValue = parseFloat(order.total);
+
+    // Fetch customer for recipient name
+    const customer = await storage.getCustomer(order.customerId);
+    const recipientName = customer?.name || "Destinatário";
+
+    console.log(`[AutoLabel] Order ${orderId}: pkg=${JSON.stringify(pkg)}, serviceId=${serviceId}, to=${addr.city}/${addr.state}`);
+
+    // 4. Add to Melhor Envio cart
+    const { cartItemId } = await addToMelhorEnvioCart({
+      melhorEnvioServiceId: serviceId,
+      fromCep: WAREHOUSE_CEP,
+      toCep: addr.cep,
+      toName: recipientName,
+      toAddress: addr.street,
+      toNumber: addr.number,
+      toComplement: addr.complement,
+      toNeighborhood: addr.neighborhood,
+      toCity: addr.city,
+      toState: addr.state,
+      pkg,
+      insuredValue,
+      orderId,
+    });
+    console.log(`[AutoLabel] Order ${orderId}: added to cart, cartItemId=${cartItemId}`);
+
+    // 5. Checkout (purchase) the shipment
+    await checkoutShipment([cartItemId]);
+    console.log(`[AutoLabel] Order ${orderId}: shipment checked out`);
+
+    // 6. Generate the label PDF
+    await generateLabel([cartItemId]);
+    console.log(`[AutoLabel] Order ${orderId}: label generated`);
+
+    // 7. Get the printable label URL
+    const { url } = await getLabelUrl([cartItemId]);
+    console.log(`[AutoLabel] Order ${orderId}: label URL=${url}`);
+
+    // 8. Save label URL and update status to production
+    await storage.updateShippingLabel(orderId, url);
+    await storage.updateOrderStatus(orderId, "production");
+    console.log(`[AutoLabel] Order ${orderId}: label saved, status → production`);
+  } catch (err: any) {
+    // Graceful failure — log error but don't rethrow.
+    // Admin can still generate the label manually from the panel.
+    console.error(`[AutoLabel] Failed for order ${orderId}:`, err?.message || err);
+  }
 }
