@@ -343,6 +343,11 @@ export function registerAdminRoutes(app: Express) {
       res.status(404).json({ message: "Pedido não encontrado" });
       return;
     }
+    // Auto-approve payment when confirming a WhatsApp Pix order
+    if (req.body.status === "confirmed" && order.paymentMethod === "whatsapp_pix" && order.paymentStatus === "pending") {
+      await storage.updatePaymentStatus(orderId, "approved");
+    }
+
     await audit(req.adminUserId!, "update_status", "order", orderId, { status: req.body.status });
     triggerOrderEmail(orderId, req.body.status).catch(() => {});
 

@@ -4,7 +4,8 @@ import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
   MapPin, Truck, CreditCard, Check, ChevronRight,
-  Loader2, ArrowLeft, ExternalLink, AlertCircle,
+  Loader2, ArrowLeft, ExternalLink, AlertCircle, Tag, X,
+  MessageCircle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { GraficaNavbar } from "@/components/grafica/grafica-navbar";
@@ -14,7 +15,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/grafica/price-engine";
 import { apiRequest } from "@/lib/queryClient";
 import type { ShippingQuote } from "@shared/types";
+import type { Address } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { trackBeginCheckout } from "@/hooks/use-analytics";
 
 const EASE: [number, number, number, number] = [0.25, 0.46, 0.45, 0.94];
 
@@ -67,6 +70,45 @@ export default function GraficaCheckout() {
   const [notes, setNotes] = useState("");
   const [lookingUpCep, setLookingUpCep] = useState(false);
 
+  // Coupon state
+  const [couponInput, setCouponInput] = useState("");
+  const [couponCode, setCouponCode] = useState<string | null>(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
+  const [couponMessage, setCouponMessage] = useState("");
+  const [couponValidating, setCouponValidating] = useState(false);
+  const [couponError, setCouponError] = useState("");
+
+  const [useSavedAddress, setUseSavedAddress] = useState<string | null>(null);
+
+  // Saved addresses
+  const { data: savedAddresses } = useQuery<Address[]>({
+    queryKey: ["/api/grafica/account/addresses"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/grafica/account/addresses");
+      return res.json();
+    },
+    enabled: isAuthenticated,
+  });
+
+  // Payment mode config
+  const { data: paymentConfig } = useQuery<{ mode: string }>({
+    queryKey: ["/api/config/payment-mode"],
+    queryFn: async () => {
+      const res = await fetch("/api/config/payment-mode");
+      return res.json();
+    },
+  });
+  const isWhatsApp = paymentConfig?.mode === "whatsapp";
+
+  const selectSavedAddress = useCallback((addr: Address) => {
+    setUseSavedAddress(addr.id);
+    setAddress({
+      cep: addr.cep, street: addr.street, number: addr.number,
+      complement: addr.complement || "", neighborhood: addr.neighborhood,
+      city: addr.city, state: addr.state,
+    });
+  }, []);
+
   const items = cart?.items ?? [];
   const subtotal = cart?.subtotal ?? 0;
 
@@ -86,7 +128,7 @@ export default function GraficaCheckout() {
   const shippingCost = selectedShipping !== null && shippingQuotes
     ? shippingQuotes[selectedShipping]?.price ?? 0
     : 0;
-  const total = subtotal + shippingCost;
+  const total = subtotal - couponDiscount + shippingCost;
 
   // CEP lookup
   const lookupCep = useCallback(async (cep: string) => {
@@ -109,6 +151,38 @@ export default function GraficaCheckout() {
     setLookingUpCep(false);
   }, []);
 
+  // Coupon apply
+  const applyCoupon = useCallback(async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    setCouponValidating(true);
+    setCouponError("");
+    setCouponMessage("");
+    try {
+      const res = await apiRequest("POST", "/api/grafica/coupons/validate", { code, subtotal });
+      const data = await res.json();
+      if (data.valid) {
+        setCouponCode(data.code);
+        setCouponDiscount(data.discountAmount);
+        setCouponMessage(data.message);
+        setCouponError("");
+      } else {
+        setCouponError(data.message || "Cupom inválido");
+      }
+    } catch {
+      setCouponError("Erro ao validar cupom");
+    }
+    setCouponValidating(false);
+  }, [couponInput, subtotal]);
+
+  const removeCoupon = useCallback(() => {
+    setCouponCode(null);
+    setCouponDiscount(0);
+    setCouponMessage("");
+    setCouponError("");
+    setCouponInput("");
+  }, []);
+
   // Checkout mutation — creates order + MP preference, then redirects to MercadoPago
   const checkout = useMutation({
     mutationFn: async () => {
@@ -120,11 +194,47 @@ export default function GraficaCheckout() {
         address,
         shippingOption: shippingQuotes?.[selectedShipping ?? 0],
         notes,
+        couponCode: couponCode || undefined,
       });
       return res.json();
     },
     onSuccess: (data) => {
-      if (data.initPoint) {
+      if (data.paymentMode === "whatsapp") {
+        // Build WhatsApp message
+        const lines: string[] = [];
+        lines.push(`*NOVO PEDIDO #${data.orderId.slice(0, 8).toUpperCase()}*`);
+        lines.push(`Cliente: ${data.customerName}`);
+        lines.push("");
+        lines.push("*Itens:*");
+        for (const item of data.itemsSummary) {
+          lines.push(`- ${item.name} (${item.quantity.toLocaleString("pt-BR")}x R$ ${item.unitPrice.toFixed(2)}) = R$ ${item.subtotal.toFixed(2)}`);
+        }
+        lines.push("");
+        lines.push(`*Subtotal:* R$ ${data.subtotal.toFixed(2)}`);
+        if (data.discountAmount > 0) {
+          lines.push(`*Desconto${data.couponCode ? ` (${data.couponCode})` : ""}:* -R$ ${data.discountAmount.toFixed(2)}`);
+        }
+        if (data.shippingCost > 0) {
+          lines.push(`*Frete:* R$ ${data.shippingCost.toFixed(2)}${data.shippingService ? ` (${data.shippingService})` : ""}`);
+        }
+        lines.push(`*TOTAL: R$ ${data.total.toFixed(2)}*`);
+
+        if (data.address) {
+          lines.push("");
+          lines.push("*Endereço de entrega:*");
+          lines.push(`${data.address.street}, ${data.address.number}${data.address.complement ? ` - ${data.address.complement}` : ""}`);
+          lines.push(`${data.address.neighborhood} — ${data.address.city}/${data.address.state}`);
+          lines.push(`CEP: ${data.address.cep}`);
+        }
+
+        lines.push("");
+        lines.push("Aguardo confirmação do pagamento via Pix.");
+
+        const text = encodeURIComponent(lines.join("\n"));
+        const waUrl = `https://wa.me/${data.whatsappNumber}?text=${text}`;
+        window.open(waUrl, "_blank");
+        setLocation(`/grafica/pedido/${data.orderId}?source=whatsapp`);
+      } else if (data.initPoint) {
         // Redirect to MercadoPago Checkout Pro
         window.location.href = data.initPoint;
       } else if (data.sandboxInitPoint) {
@@ -148,7 +258,10 @@ export default function GraficaCheckout() {
 
   const nextStep = () => {
     if (step === "address") setStep("shipping");
-    else if (step === "shipping") setStep("review");
+    else if (step === "shipping") {
+      setStep("review");
+      trackBeginCheckout(subtotal);
+    }
     else if (step === "review") checkout.mutate();
   };
 
@@ -262,6 +375,48 @@ export default function GraficaCheckout() {
 
                   <div className="h-px bg-border" />
 
+                  {/* Saved addresses selector */}
+                  {savedAddresses && savedAddresses.length > 0 && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-foreground block">Endereços salvos</label>
+                      <div className="space-y-2">
+                        {savedAddresses.map((addr) => (
+                          <button
+                            key={addr.id}
+                            onClick={() => selectSavedAddress(addr)}
+                            className={cn(
+                              "w-full text-left p-3 rounded-lg border transition-all",
+                              useSavedAddress === addr.id
+                                ? "border-primary bg-primary/5"
+                                : "border-border hover:border-primary/50",
+                            )}
+                          >
+                            <p className="text-sm font-medium">{addr.label}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {addr.street}, {addr.number}{addr.complement ? ` - ${addr.complement}` : ""} — {addr.city}/{addr.state}
+                            </p>
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => {
+                            setUseSavedAddress(null);
+                            setAddress({ cep: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "" });
+                          }}
+                          className={cn(
+                            "w-full text-left p-3 rounded-lg border transition-all text-sm",
+                            useSavedAddress === null
+                              ? "border-primary bg-primary/5 font-medium"
+                              : "border-border hover:border-primary/50 text-muted-foreground",
+                          )}
+                        >
+                          Usar outro endereço
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Manual address form (shown if no saved addresses or "usar outro" selected) */}
+                  {(!savedAddresses || savedAddresses.length === 0 || useSavedAddress === null) && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="text-sm font-medium text-foreground block mb-1.5">CEP</label>
@@ -341,6 +496,7 @@ export default function GraficaCheckout() {
                       />
                     </div>
                   </div>
+                  )}
                 </div>
               )}
 
@@ -460,18 +616,70 @@ export default function GraficaCheckout() {
                     />
                   </div>
 
-                  {/* MercadoPago info */}
-                  <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5 space-y-3">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="w-5 h-5 text-blue-500" />
-                      <p className="font-medium text-sm">Pagamento via Mercado Pago</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Ao clicar em "Pagar com Mercado Pago", você será redirecionado para o ambiente seguro do
-                      Mercado Pago onde poderá escolher entre <strong>Pix</strong>, <strong>Cartão de Crédito</strong>,
-                      {" "}<strong>Boleto</strong> ou <strong>Saldo em conta</strong>.
-                    </p>
+                  {/* Coupon */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground block">
+                      Cupom de desconto <span className="text-muted-foreground font-normal">(opcional)</span>
+                    </label>
+                    {couponCode ? (
+                      <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/5 px-4 py-2.5">
+                        <Tag className="w-4 h-4 text-green-500" />
+                        <span className="text-sm font-medium text-green-500 flex-1">
+                          {couponCode} — {couponMessage}
+                        </span>
+                        <button onClick={removeCoupon} className="p-1 rounded hover:bg-muted transition-colors">
+                          <X className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={couponInput}
+                          onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                          className="flex-1 px-4 py-2.5 rounded-lg border border-border bg-background text-foreground focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none transition-colors font-mono uppercase"
+                          placeholder="CODIGO"
+                        />
+                        <button
+                          onClick={applyCoupon}
+                          disabled={couponValidating || !couponInput.trim()}
+                          className="px-4 py-2.5 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-primary transition-colors disabled:opacity-50"
+                        >
+                          {couponValidating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Aplicar"}
+                        </button>
+                      </div>
+                    )}
+                    {couponError && (
+                      <p className="text-xs text-red-500">{couponError}</p>
+                    )}
                   </div>
+
+                  {/* Payment info */}
+                  {isWhatsApp ? (
+                    <div className="rounded-xl border border-[#25D366]/30 bg-[#25D366]/5 p-5 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <MessageCircle className="w-5 h-5 text-[#25D366]" />
+                        <p className="font-medium text-sm">Pagamento via WhatsApp + Pix</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Ao clicar em "Finalizar no WhatsApp", seu pedido será criado e você será direcionado ao
+                        nosso WhatsApp com os dados do pedido. Enviaremos a <strong>chave Pix</strong> para pagamento
+                        e confirmaremos assim que identificarmos o depósito.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="w-5 h-5 text-blue-500" />
+                        <p className="font-medium text-sm">Pagamento via Mercado Pago</p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Ao clicar em "Pagar com Mercado Pago", você será redirecionado para o ambiente seguro do
+                        Mercado Pago onde poderá escolher entre <strong>Pix</strong>, <strong>Cartão de Crédito</strong>,
+                        {" "}<strong>Boleto</strong> ou <strong>Saldo em conta</strong>.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Error display */}
                   {checkout.isError && (
@@ -512,7 +720,9 @@ export default function GraficaCheckout() {
                     "px-6 py-3 rounded-full text-sm font-medium flex items-center gap-2 transition-all",
                     canProceed()
                       ? step === "review"
-                        ? "bg-[#009ee3] text-white hover:bg-[#0085c5]"
+                        ? isWhatsApp
+                          ? "bg-[#25D366] text-white hover:bg-[#1da851]"
+                          : "bg-[#009ee3] text-white hover:bg-[#0085c5]"
                         : "bg-foreground text-background hover:bg-primary"
                       : "bg-muted text-muted-foreground cursor-not-allowed",
                   )}
@@ -520,13 +730,20 @@ export default function GraficaCheckout() {
                   {checkout.isPending ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Redirecionando...
+                      {isWhatsApp ? "Criando pedido..." : "Redirecionando..."}
                     </>
                   ) : step === "review" ? (
-                    <>
-                      Pagar com Mercado Pago
-                      <ExternalLink className="w-4 h-4" />
-                    </>
+                    isWhatsApp ? (
+                      <>
+                        Finalizar no WhatsApp
+                        <MessageCircle className="w-4 h-4" />
+                      </>
+                    ) : (
+                      <>
+                        Pagar com Mercado Pago
+                        <ExternalLink className="w-4 h-4" />
+                      </>
+                    )
                   ) : (
                     <>
                       Continuar
@@ -571,6 +788,12 @@ export default function GraficaCheckout() {
                   <span className="text-muted-foreground">Subtotal</span>
                   <span className="font-mono">{formatCurrency(subtotal)}</span>
                 </div>
+                {couponDiscount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-green-500">Desconto ({couponCode})</span>
+                    <span className="font-mono text-green-500">-{formatCurrency(couponDiscount)}</span>
+                  </div>
+                )}
                 {shippingCost > 0 && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Frete</span>

@@ -78,6 +78,12 @@ Sitemap: ${siteUrl}/sitemap.xml
 `);
   });
 
+  // ── Payment Mode Config ──
+
+  app.get("/api/config/payment-mode", (_req, res) => {
+    res.json({ mode: process.env.PAYMENT_MODE || "mercadopago" });
+  });
+
   // ── Gráfica: Categories ──
 
   app.get("/api/grafica/categories", async (_req, res) => {
@@ -454,7 +460,7 @@ Sitemap: ${siteUrl}/sitemap.xml
       subtotal: subtotal.toFixed(2),
       shippingCost: shippingCost.toFixed(2),
       total: total.toFixed(2),
-      paymentMethod: "mercadopago",
+      paymentMethod: (process.env.PAYMENT_MODE || "mercadopago") === "whatsapp" ? "whatsapp_pix" : "mercadopago",
       paymentStatus: "pending",
       paymentExternalId: null,
       mpPreferenceId: null,
@@ -488,6 +494,40 @@ Sitemap: ${siteUrl}/sitemap.xml
     }));
 
     await storage.addOrderItems(orderItemsData);
+
+    const paymentMode = process.env.PAYMENT_MODE || "mercadopago";
+
+    // ── WhatsApp flow: clear cart + return order data (skip MercadoPago) ──
+    if (paymentMode === "whatsapp") {
+      await storage.clearCart(sessionId);
+
+      const itemsSummary = orderItemsData.map((item) => ({
+        name: item.productName,
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice),
+        subtotal: parseFloat(item.subtotal),
+      }));
+
+      const selectedQuote = shippingOption || null;
+
+      res.status(201).json({
+        paymentMode: "whatsapp",
+        orderId: order.id,
+        customerName: customerName || "Cliente",
+        itemsSummary,
+        subtotal,
+        discountAmount,
+        couponCode: appliedCouponCode,
+        shippingCost,
+        shippingService: selectedQuote ? `${selectedQuote.carrier} - ${selectedQuote.service}` : null,
+        total,
+        address: address || null,
+        whatsappNumber: process.env.WHATSAPP_NUMBER || "",
+      });
+      return;
+    }
+
+    // ── MercadoPago flow (unchanged) ──
     // Cart is NOT cleared here — it will be cleared in the webhook when payment is approved
 
     // Create MercadoPago Checkout Pro preference

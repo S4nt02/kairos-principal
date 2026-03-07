@@ -101,17 +101,26 @@ export default function OrderDetail({ id }: { id: string }) {
           <OrderTimeline currentStatus={order.status} />
           {canEdit && nextStatuses.length > 0 && (
             <div className="flex gap-2 mt-4">
-              {nextStatuses.map((s) => (
-                <Button
-                  key={s}
-                  size="sm"
-                  variant={s === "cancelled" ? "destructive" : "default"}
-                  onClick={() => statusMutation.mutate(s)}
-                  disabled={statusMutation.isPending}
-                >
-                  {s === "cancelled" ? "Cancelar" : `Mover para ${s}`}
-                </Button>
-              ))}
+              {nextStatuses.map((s) => {
+                const label = s === "cancelled" ? "Cancelar"
+                  : s === "confirmed" && order.paymentMethod === "whatsapp_pix" ? "Confirmar Pagamento"
+                  : s === "confirmed" ? "Confirmar Pedido"
+                  : s === "production" ? "Processar Pedido"
+                  : s === "shipped" ? "Marcar como Enviado"
+                  : s === "delivered" ? "Marcar como Entregue"
+                  : `Mover para ${s}`;
+                return (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={s === "cancelled" ? "destructive" : "default"}
+                    onClick={() => statusMutation.mutate(s)}
+                    disabled={statusMutation.isPending}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -204,7 +213,7 @@ export default function OrderDetail({ id }: { id: string }) {
               {order.paymentMethod && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Método</span>
-                  <span>{order.paymentMethod}</span>
+                  <span>{order.paymentMethod === "whatsapp_pix" ? "WhatsApp Pix" : order.paymentMethod}</span>
                 </div>
               )}
             </CardContent>
