@@ -23,6 +23,7 @@ const GraficaLogin = lazy(() => import("./pages/grafica/login"));
 const GraficaFAQ = lazy(() => import("./pages/grafica/faq"));
 const GraficaTermos = lazy(() => import("./pages/grafica/termos"));
 const GraficaPrivacidade = lazy(() => import("./pages/grafica/privacidade"));
+const EstrategiaConteudo = lazy(() => import("./pages/estrategia/index"));
 const AdminLogin = lazy(() => import("./pages/admin/login"));
 const AdminLayout = lazy(() => import("./pages/admin/layout"));
 
@@ -130,6 +131,13 @@ function Router() {
         <ErrorBoundary>
           <Suspense fallback={<GraficaLoading />}>
             <GraficaPrivacidade />
+          </Suspense>
+        </ErrorBoundary>
+      </Route>
+      <Route path="/estrategia">
+        <ErrorBoundary>
+          <Suspense fallback={<GraficaLoading />}>
+            <EstrategiaConteudo />
           </Suspense>
         </ErrorBoundary>
       </Route>

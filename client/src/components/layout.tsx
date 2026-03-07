@@ -14,6 +14,7 @@ const NAV_LINKS: Array<{ label: string; id?: string; href?: string }> = [
   { label: "Serviços", id: "servicos" },
   { label: "Manifesto", id: "manifesto" },
   { label: "Gráfica", href: "/grafica" },
+  { label: "Estratégia", href: "/estrategia" },
 ];
 
 export function Navbar() {
@@ -197,6 +198,17 @@ export function Navbar() {
             </div>
           </Link>
 
+          {/* Estratégia */}
+          <Link href="/estrategia">
+            <div
+              ref={(el) => { btnRefs.current["estrategia"] = el; }}
+              onMouseEnter={() => handleEnter("estrategia")}
+              className="px-5 py-2.5 text-sm font-medium text-white/80 hover:text-white transition-colors rounded-full relative z-10 cursor-pointer"
+            >
+              Estratégia
+            </div>
+          </Link>
+
           {/* Contato */}
           <div className="relative" onMouseEnter={() => handleEnter("contact")}>
             <button
@@ -351,8 +363,8 @@ export function Navbar() {
 }
 
 const FOOTER_EASE: [number, number, number, number] = [0.25, 0.46, 0.45, 0.94];
-const navLinks = ["Sobre", "Serviços", "Manifesto", "Gráfica", "Valores"];
-const navHrefs = ["#sobre", "#servicos", "#manifesto", "/grafica", "#valores"];
+const navLinks = ["Sobre", "Serviços", "Manifesto", "Gráfica", "Estratégia", "Valores"];
+const navHrefs = ["#sobre", "#servicos", "#manifesto", "/grafica", "/estrategia", "#valores"];
 
 export function Footer() {
   return (
