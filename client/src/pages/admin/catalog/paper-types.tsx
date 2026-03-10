@@ -18,11 +18,20 @@ interface PaperForm {
 
 const defaultForm: PaperForm = { name: "", weightGsm: 250, finish: "fosco", costPerSheet: "0.15", active: true, sortOrder: 0 };
 
+const FINISH_OPTIONS = [
+  { value: "fosco", label: "Fosco" },
+  { value: "brilho", label: "Brilho" },
+  { value: "natural", label: "Natural" },
+];
+
+const finishLabel = (v: string) => FINISH_OPTIONS.find((o) => o.value === v)?.label || v;
+
 export default function PaperTypes() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<PaperForm>(defaultForm);
+  const [customFinish, setCustomFinish] = useState(false);
 
   const { data: papers } = useQuery<PaperType[]>({
     queryKey: ["/api/admin/paper-types"],
@@ -67,6 +76,7 @@ export default function PaperTypes() {
   const openEdit = (p: PaperType) => {
     setEditId(p.id);
     setForm({ name: p.name, weightGsm: p.weightGsm, finish: p.finish, costPerSheet: p.costPerSheet, active: p.active, sortOrder: p.sortOrder });
+    setCustomFinish(!FINISH_OPTIONS.some((o) => o.value === p.finish));
     setOpen(true);
   };
 
@@ -76,7 +86,7 @@ export default function PaperTypes() {
         <h1 className="text-2xl font-bold">Tipos de Papel</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button onClick={() => { setEditId(null); setForm(defaultForm); }}><Plus className="h-4 w-4 mr-2" />Novo</Button>
+            <Button onClick={() => { setEditId(null); setForm(defaultForm); setCustomFinish(false); }}><Plus className="h-4 w-4 mr-2" />Novo</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>{editId ? "Editar" : "Novo"} Tipo de Papel</DialogTitle></DialogHeader>
@@ -86,14 +96,20 @@ export default function PaperTypes() {
                 <div className="space-y-2"><Label>Gramatura (gsm)</Label><Input type="number" min={1} value={form.weightGsm} onChange={(e) => setForm({ ...form, weightGsm: parseInt(e.target.value) || 0 })} /></div>
                 <div className="space-y-2">
                   <Label>Acabamento</Label>
-                  <Select value={form.finish} onValueChange={(v) => setForm({ ...form, finish: v })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fosco">Fosco</SelectItem>
-                      <SelectItem value="brilho">Brilho</SelectItem>
-                      <SelectItem value="natural">Natural</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {customFinish ? (
+                    <div className="flex gap-2">
+                      <Input value={form.finish} onChange={(e) => setForm({ ...form, finish: e.target.value })} placeholder="Digite o acabamento..." required autoFocus />
+                      <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => { setCustomFinish(false); setForm({ ...form, finish: "fosco" }); }}>Voltar</Button>
+                    </div>
+                  ) : (
+                    <Select value={form.finish} onValueChange={(v) => { if (v === "__custom__") { setCustomFinish(true); setForm({ ...form, finish: "" }); } else { setForm({ ...form, finish: v }); } }}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {FINISH_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        <SelectItem value="__custom__">Outro...</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -125,7 +141,7 @@ export default function PaperTypes() {
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell className="text-center">{p.weightGsm}g</TableCell>
-                <TableCell>{p.finish}</TableCell>
+                <TableCell>{finishLabel(p.finish)}</TableCell>
                 <TableCell className="text-right">R$ {parseFloat(p.costPerSheet).toFixed(4)}</TableCell>
                 <TableCell className="text-center">{p.active ? "Sim" : "Não"}</TableCell>
                 <TableCell className="text-center">{p.sortOrder}</TableCell>
