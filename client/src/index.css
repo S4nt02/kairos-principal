@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* ── Brand Fonts: Zero Neue (titles) + Linear Grotesk (body) ── */
+/* ── Brand Fonts: Zero Neue (titles, self-hosted) + Montserrat (body, Google Fonts) ── */
 @font-face {
   font-family: 'Zero Neue';
   src: url('/fonts/zero-neue/ZeroNeue-Regular.otf') format('opentype');
@@ -27,35 +27,6 @@
   font-family: 'Zero Neue';
   src: url('/fonts/zero-neue/ZeroNeue-Black.otf') format('opentype');
   font-weight: 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Linear Grotesk';
-  src: url('/fonts/linear-grotesk/LinearGrotesk-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Linear Grotesk';
-  src: url('/fonts/linear-grotesk/LinearGrotesk-Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Linear Grotesk';
-  src: url('/fonts/linear-grotesk/LinearGrotesk-SemiBold.ttf') format('truetype');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'Linear Grotesk';
-  src: url('/fonts/linear-grotesk/LinearGrotesk-Bold.ttf') format('truetype');
-  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -89,7 +60,7 @@
   --color-input: #C6C6C6;
   --color-ring: #202926;
 
-  --font-sans: 'Linear Grotesk', sans-serif;
+  --font-sans: 'Montserrat', sans-serif;
   --font-display: 'Zero Neue', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
