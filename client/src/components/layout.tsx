@@ -88,7 +88,7 @@ export function Navbar() {
     <motion.img
       src="/logos/logo-tipografia-branco.png"
       alt="Kairós"
-      className="h-8 w-auto"
+      className="h-14 w-auto"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4, delay: 0.3 }}
