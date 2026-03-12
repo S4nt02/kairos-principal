@@ -35,21 +35,24 @@ export default function Home() {
         console.warn("Audio play failed:", err);
       });
       document.removeEventListener("click", startAudio);
-      document.removeEventListener("scroll", startAudio);
+      document.removeEventListener("wheel", startAudio);
       document.removeEventListener("keydown", startAudio);
       document.removeEventListener("touchstart", startAudio);
+      document.removeEventListener("pointerdown", startAudio);
     };
 
     document.addEventListener("click", startAudio);
-    document.addEventListener("scroll", startAudio);
+    document.addEventListener("wheel", startAudio);
     document.addEventListener("keydown", startAudio);
     document.addEventListener("touchstart", startAudio);
+    document.addEventListener("pointerdown", startAudio);
 
     return () => {
       document.removeEventListener("click", startAudio);
-      document.removeEventListener("scroll", startAudio);
+      document.removeEventListener("wheel", startAudio);
       document.removeEventListener("keydown", startAudio);
       document.removeEventListener("touchstart", startAudio);
+      document.removeEventListener("pointerdown", startAudio);
       if (audio) {
         audio.pause();
         audio.src = "";
