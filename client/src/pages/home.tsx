@@ -4,7 +4,7 @@ import { Hero, PurposeBlock } from "@/components/home-sections";
 import { ManifestoSection } from "@/components/manifesto-section";
 import { ServicesSection } from "@/components/services-section";
 import { ValuesSection } from "@/components/values-section";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Volume2, VolumeX } from "lucide-react";
 import gsap from "gsap";
 import ScrollTrigger from "gsap/ScrollTrigger";
@@ -16,41 +16,56 @@ const EASE: [number, number, number, number] = [0.25, 0.46, 0.45, 0.94];
 export default function Home() {
   const sobreHeadingRef = useRef<HTMLHeadingElement>(null);
   const sobreSectionRef = useRef<HTMLElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [muted, setMuted] = useState(true);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
 
-  // Autoplay muted, then unmute on first user interaction
+  // Create audio element and start playing on first user interaction
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.volume = 0.35;
-    audio.play().catch(() => {});
+    let audio: HTMLAudioElement | null = null;
 
-    const unmute = () => {
-      audio.muted = false;
-      setMuted(false);
-      if (audio.paused) audio.play().catch(() => {});
-      document.removeEventListener("click", unmute);
-      document.removeEventListener("scroll", unmute);
-      document.removeEventListener("keydown", unmute);
+    const startAudio = () => {
+      if (audio) return; // already started
+      audio = new Audio("/audio/bg-music.mp3");
+      audio.loop = true;
+      audio.volume = 0.35;
+      audioRef.current = audio;
+      audio.play().then(() => {
+        setPlaying(true);
+      }).catch((err) => {
+        console.warn("Audio play failed:", err);
+      });
+      document.removeEventListener("click", startAudio);
+      document.removeEventListener("scroll", startAudio);
+      document.removeEventListener("keydown", startAudio);
+      document.removeEventListener("touchstart", startAudio);
     };
-    document.addEventListener("click", unmute, { once: true });
-    document.addEventListener("scroll", unmute, { once: true });
-    document.addEventListener("keydown", unmute, { once: true });
+
+    document.addEventListener("click", startAudio);
+    document.addEventListener("scroll", startAudio);
+    document.addEventListener("keydown", startAudio);
+    document.addEventListener("touchstart", startAudio);
 
     return () => {
-      document.removeEventListener("click", unmute);
-      document.removeEventListener("scroll", unmute);
-      document.removeEventListener("keydown", unmute);
+      document.removeEventListener("click", startAudio);
+      document.removeEventListener("scroll", startAudio);
+      document.removeEventListener("keydown", startAudio);
+      document.removeEventListener("touchstart", startAudio);
+      if (audio) {
+        audio.pause();
+        audio.src = "";
+      }
     };
   }, []);
 
   const toggleMute = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.muted = !audio.muted;
-    setMuted(audio.muted);
-    if (!audio.muted && audio.paused) audio.play().catch(() => {});
+    if (audio.paused) {
+      audio.play().then(() => setPlaying(true)).catch(() => {});
+    } else {
+      audio.pause();
+      setPlaying(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -77,15 +92,13 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background font-sans">
-      <audio ref={audioRef} src="/audio/bg-music.mp3" loop muted preload="auto" />
-
       {/* Sound toggle button — fixed bottom-right */}
       <button
         onClick={toggleMute}
         className="fixed bottom-6 right-6 z-50 p-3 rounded-full bg-black/30 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/50 transition-all duration-300"
-        aria-label={muted ? "Ativar som" : "Silenciar"}
+        aria-label={playing ? "Silenciar" : "Ativar som"}
       >
-        {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+        {playing ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
       </button>
 
       <Navbar />
