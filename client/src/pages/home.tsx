@@ -14,14 +14,12 @@ const EASE: [number, number, number, number] = [0.25, 0.46, 0.45, 0.94];
 
 export default function Home() {
   const sobreHeadingRef = useRef<HTMLHeadingElement>(null);
-  const sobreSubRef = useRef<HTMLParagraphElement>(null);
   const sobreSectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const heading = sobreHeadingRef.current;
-    const sub = sobreSubRef.current;
     const section = sobreSectionRef.current;
-    if (!heading || !sub || !section) return;
+    if (!heading || !section) return;
 
     // Parallax: heading moves up at 60% scroll speed
     const st1 = gsap.to(heading, {
@@ -35,21 +33,8 @@ export default function Home() {
       },
     });
 
-    // Parallax: sub moves up at 40% scroll speed (slower = deeper layer)
-    const st2 = gsap.to(sub, {
-      y: -35,
-      ease: "none",
-      scrollTrigger: {
-        trigger: section,
-        start: "top bottom",
-        end: "bottom top",
-        scrub: 0.6,
-      },
-    });
-
     return () => {
       st1.kill();
-      st2.kill();
     };
   }, []);
 
@@ -93,23 +78,6 @@ export default function Home() {
                   <br />
                   <span className="text-white/70">dedicada ao Reino.</span>
                 </motion.h3>
-              </div>
-
-              {/* Body — also parallaxed, slower */}
-              <div className="max-w-3xl">
-                <motion.p
-                  ref={sobreSubRef}
-                  initial={{ y: 30, opacity: 0 }}
-                  whileInView={{ y: 0, opacity: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 1.0, delay: 0.3, ease: EASE }}
-                  className="text-xl md:text-2xl font-sans font-medium leading-relaxed text-white/80 gsap-parallax"
-                  style={{ mixBlendMode: "difference" }}
-                >
-                  Unimos moda, editorial, produção cultural, audiovisual e
-                  branding em um mesmo movimento: dar forma ao que o céu
-                  comunica.
-                </motion.p>
               </div>
             </div>
           </div>
