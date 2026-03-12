@@ -88,7 +88,7 @@ export function Navbar() {
     <motion.img
       src="/logos/logo-tipografia-branco.png"
       alt="Kairós"
-      className="h-5 w-auto"
+      className="h-8 w-auto"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4, delay: 0.3 }}
@@ -379,7 +379,7 @@ export function Footer() {
               viewport={{ once: true }}
               transition={{ duration: 0.8, ease: FOOTER_EASE }}
             >
-              <img src="/logos/logo-tipografia-branco.png" alt="Kairós" className="h-7 w-auto" />
+              <img src="/logos/logo-tipografia-branco.png" alt="Kairós" className="h-10 w-auto" />
             </motion.div>
             <motion.p
               initial={{ opacity: 0, y: 16 }}
