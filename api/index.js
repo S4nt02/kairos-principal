@@ -85014,7 +85014,7 @@ var DatabaseStorage = class {
 };
 var storage = new DatabaseStorage();
 
-// server/routes.ts
+// server/routes/grafica.ts
 import { randomUUID, createHmac, timingSafeEqual } from "crypto";
 
 // server/middleware/validate.ts
@@ -87384,43 +87384,6 @@ async function autoGenerateLabel(orderId) {
   } catch (err) {
     console.error(`[AutoLabel] Failed for order ${orderId}:`, err?.message || err);
   }
-}
-
-// server/middleware/admin-auth.ts
-function requireAdmin(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith("Bearer ")) {
-    res.status(401).json({ message: "Autentica\xE7\xE3o administrativa necess\xE1ria" });
-    return;
-  }
-  const token = authHeader.slice(7);
-  const payload = verifyAdminToken(token);
-  if (!payload) {
-    res.status(401).json({ message: "Token administrativo inv\xE1lido ou expirado" });
-    return;
-  }
-  storage.getAdminUser(payload.adminUserId).then((admin) => {
-    if (!admin || !admin.active) {
-      res.status(401).json({ message: "Conta administrativa desativada" });
-      return;
-    }
-    req.adminUserId = payload.adminUserId;
-    req.adminRole = payload.role;
-    next();
-  }).catch(() => {
-    res.status(500).json({ message: "Erro ao verificar credenciais" });
-  });
-}
-function requireRole(...roles) {
-  return (req, res, next) => {
-    requireAdmin(req, res, () => {
-      if (req.adminRole === "admin" || roles.includes(req.adminRole)) {
-        next();
-        return;
-      }
-      res.status(403).json({ message: "Permiss\xE3o insuficiente" });
-    });
-  };
 }
 
 // node_modules/express-rate-limit/dist/index.mjs
@@ -97863,8 +97826,798 @@ async function getSignedArtUrl(filePath) {
   return data.signedUrl;
 }
 
-// server/routes/admin.ts
+// server/routes/grafica.ts
 var import_multer = __toESM(require_multer(), 1);
+function registerGraficaRoutes(app2) {
+  app2.get("/api/grafica/categories", async (_req, res) => {
+    const categories2 = await storage.getCategories();
+    const result = await Promise.all(
+      categories2.map(async (cat) => {
+        const productCount = await storage.getProductCountByCategory(cat.id);
+        return { ...cat, productCount };
+      })
+    );
+    res.json(result);
+  });
+  app2.get("/api/grafica/categories/:slug", async (req, res) => {
+    const category = await storage.getCategoryBySlug(req.params.slug);
+    if (!category) {
+      res.status(404).json({ message: "Categoria n\xE3o encontrada" });
+      return;
+    }
+    const products2 = await storage.getProductsByCategory(category.id);
+    const productsWithPrice = await Promise.all(
+      products2.map(async (product) => {
+        const rules = await storage.getPriceRules(product.id);
+        const prices = rules.map((r) => parseFloat(r.pricePerUnit));
+        const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
+        return { ...product, priceRange };
+      })
+    );
+    const result = {
+      ...category,
+      products: productsWithPrice
+    };
+    res.json(result);
+  });
+  app2.get("/api/grafica/products/:slug", async (req, res) => {
+    const product = await storage.getProductBySlug(req.params.slug);
+    if (!product) {
+      res.status(404).json({ message: "Produto n\xE3o encontrado" });
+      return;
+    }
+    const category = await storage.getCategoryById(product.categoryId);
+    if (!category) {
+      res.status(404).json({ message: "Categoria do produto n\xE3o encontrada" });
+      return;
+    }
+    const variants = await storage.getProductVariants(product.id);
+    const priceRules2 = await storage.getPriceRules(product.id);
+    const allPapers = await storage.getPaperTypes();
+    const allFinishings = await storage.getFinishings();
+    const usedPaperIds = new Set(variants.map((v) => v.paperTypeId));
+    const usedFinishingIds = new Set(
+      variants.map((v) => v.finishingId).filter(Boolean)
+    );
+    const prices = priceRules2.map((r) => parseFloat(r.pricePerUnit));
+    const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
+    const result = {
+      ...product,
+      category,
+      variants,
+      availablePapers: allPapers.filter((p) => usedPaperIds.has(p.id)),
+      availableFinishings: allFinishings.filter((f) => usedFinishingIds.has(f.id)),
+      priceRange,
+      priceRules: priceRules2
+    };
+    res.json(result);
+  });
+  app2.get("/api/grafica/search", async (req, res) => {
+    const q = (req.query.q || "").trim();
+    if (q.length < 2) {
+      res.json([]);
+      return;
+    }
+    const products2 = await storage.searchProducts(q);
+    const enriched = await Promise.all(
+      products2.map(async (product) => {
+        const rules = await storage.getPriceRules(product.id);
+        const prices = rules.map((r) => parseFloat(r.pricePerUnit));
+        const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
+        return { ...product, priceRange };
+      })
+    );
+    res.json(enriched);
+  });
+  app2.get("/api/grafica/paper-types", async (_req, res) => {
+    const paperTypes2 = await storage.getPaperTypes();
+    res.json(paperTypes2);
+  });
+  app2.get("/api/grafica/finishings", async (_req, res) => {
+    const finishings2 = await storage.getFinishings();
+    res.json(finishings2);
+  });
+  app2.get("/api/grafica/cart/:sessionId", async (req, res) => {
+    const items = await storage.getCartItems(req.params.sessionId);
+    const uniqueProductIds = Array.from(new Set(items.map((i) => i.productId)));
+    const productResults = await Promise.all(uniqueProductIds.map((id) => storage.getProductById(id)));
+    const productMap = new Map(productResults.filter(Boolean).map((p) => [p.id, p]));
+    const itemsWithProducts = await Promise.all(
+      items.map(async (item) => {
+        const product = productMap.get(item.productId);
+        let variant;
+        if (product && item.variantId) {
+          const variants = await storage.getProductVariants(product.id);
+          variant = variants.find((v) => v.id === item.variantId);
+        }
+        return { ...item, product, variant };
+      })
+    );
+    const validItems = itemsWithProducts.filter((i) => i.product);
+    const subtotal = validItems.reduce(
+      (sum2, item) => sum2 + parseFloat(item.unitPrice) * item.quantity,
+      0
+    );
+    res.json({
+      items: validItems,
+      itemCount: validItems.reduce((sum2, item) => sum2 + item.quantity, 0),
+      subtotal
+    });
+  });
+  app2.post("/api/grafica/cart", validate(addCartItemSchema), async (req, res) => {
+    const cartItem = await storage.addCartItem(req.body);
+    res.status(201).json(cartItem);
+  });
+  app2.patch("/api/grafica/cart/:id", validate(updateCartItemSchema), async (req, res) => {
+    const { quantity } = req.body;
+    const updated = await storage.updateCartItem(req.params.id, quantity);
+    if (!updated) {
+      res.status(404).json({ message: "Item n\xE3o encontrado" });
+      return;
+    }
+    res.json(updated);
+  });
+  app2.delete("/api/grafica/cart/item/:id", async (req, res) => {
+    await storage.removeCartItem(req.params.id);
+    res.status(204).send();
+  });
+  app2.delete("/api/grafica/cart/session/:sessionId", async (req, res) => {
+    await storage.clearCart(req.params.sessionId);
+    res.status(204).send();
+  });
+  app2.post("/api/grafica/orders", async (req, res) => {
+    const order = await storage.createOrder(req.body);
+    if (req.body.items) {
+      const orderItemsToInsert = req.body.items.map((item) => ({
+        ...item,
+        orderId: order.id
+      }));
+      await storage.addOrderItems(orderItemsToInsert);
+    }
+    res.status(201).json(order);
+  });
+  app2.get("/api/grafica/orders/:id", async (req, res) => {
+    const order = await storage.getOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    const items = await storage.getOrderItems(order.id);
+    res.json({ ...order, items });
+  });
+  app2.patch("/api/grafica/orders/:id/status", validate(updateStatusSchema), async (req, res) => {
+    const { status } = req.body;
+    const updated = await storage.updateOrderStatus(req.params.id, status);
+    if (!updated) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    res.json(updated);
+  });
+  app2.post("/api/grafica/shipping/quote", async (req, res) => {
+    const { cep, sessionId } = req.body;
+    const cleanCep = (cep || "").replace(/\D/g, "");
+    if (cleanCep.length !== 8) {
+      res.status(400).json({ message: "CEP inv\xE1lido" });
+      return;
+    }
+    try {
+      const items = sessionId ? await storage.getCartItems(sessionId) : [];
+      const quotes = await calculateShipping({ destinationCep: cleanCep, items });
+      res.json(quotes);
+    } catch (err) {
+      console.error("[Shipping] Quote error:", err?.message || err);
+      res.json([
+        { carrier: "Correios", service: "PAC", price: 18.9, deliveryDays: 8 },
+        { carrier: "Correios", service: "SEDEX", price: 32.5, deliveryDays: 3 },
+        { carrier: "Jadlog", service: ".Package", price: 22.4, deliveryDays: 5 }
+      ]);
+    }
+  });
+  app2.get("/api/grafica/address/:cep", async (req, res) => {
+    const cep = req.params.cep.replace(/\D/g, "");
+    if (cep.length !== 8) {
+      res.status(400).json({ message: "CEP inv\xE1lido" });
+      return;
+    }
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await response.json();
+      if (data.erro) {
+        res.status(404).json({ message: "CEP n\xE3o encontrado" });
+        return;
+      }
+      res.json({
+        cep: data.cep,
+        street: data.logradouro,
+        neighborhood: data.bairro,
+        city: data.localidade,
+        state: data.uf,
+        complement: data.complemento
+      });
+    } catch {
+      res.status(500).json({ message: "Erro ao consultar CEP" });
+    }
+  });
+  app2.post("/api/grafica/auth/register", authLimiter, validate(registerSchema), async (req, res) => {
+    const { name, email, phone, password } = req.body;
+    const existing = await storage.getCustomerByEmail(email);
+    if (existing) {
+      res.status(409).json({ message: "E-mail j\xE1 cadastrado" });
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    const customer = await storage.createCustomer({ name, email, phone: phone || null, passwordHash });
+    const token = generateToken(customer.id);
+    sendWelcomeEmail(email, name).catch(() => {
+    });
+    res.status(201).json({
+      token,
+      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone }
+    });
+  });
+  app2.post("/api/grafica/auth/login", authLimiter, validate(loginSchema), async (req, res) => {
+    const { email, password } = req.body;
+    const customer = await storage.getCustomerByEmail(email);
+    if (!customer) {
+      res.status(401).json({ message: "E-mail ou senha incorretos" });
+      return;
+    }
+    const valid = await verifyPassword(password, customer.passwordHash);
+    if (!valid) {
+      res.status(401).json({ message: "E-mail ou senha incorretos" });
+      return;
+    }
+    const token = generateToken(customer.id);
+    res.json({
+      token,
+      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone }
+    });
+  });
+  app2.get("/api/grafica/auth/me", requireAuth, async (req, res) => {
+    const customer = await storage.getCustomer(req.customerId);
+    if (!customer) {
+      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
+      return;
+    }
+    res.json({ id: customer.id, name: customer.name, email: customer.email, phone: customer.phone });
+  });
+  app2.post("/api/grafica/checkout", checkoutLimiter, requireAuth, validate(checkoutSchema), async (req, res) => {
+    const { sessionId, customerName, customerEmail, customerPhone, address, shippingOption, notes, couponCode } = req.body;
+    const cartItemsList = await storage.getCartItems(sessionId);
+    if (cartItemsList.length === 0) {
+      res.status(400).json({ message: "Carrinho vazio" });
+      return;
+    }
+    const subtotal = cartItemsList.reduce(
+      (sum2, item) => sum2 + parseFloat(item.unitPrice) * item.quantity,
+      0
+    );
+    const shippingCost = shippingOption?.price || 0;
+    let discountAmount = 0;
+    let appliedCouponCode = null;
+    if (couponCode) {
+      const coupon = await storage.getCouponByCode(couponCode);
+      if (coupon && coupon.active) {
+        const now = /* @__PURE__ */ new Date();
+        const inPeriod = now >= new Date(coupon.validFrom) && now <= new Date(coupon.validTo);
+        const hasUses = coupon.maxUses === null || coupon.currentUses < coupon.maxUses;
+        const meetsMin = subtotal >= parseFloat(coupon.minOrderAmount);
+        if (inPeriod && hasUses && meetsMin) {
+          if (coupon.discountType === "percentage") {
+            discountAmount = subtotal * parseFloat(coupon.discountValue) / 100;
+          } else {
+            discountAmount = parseFloat(coupon.discountValue);
+          }
+          discountAmount = Math.min(discountAmount, subtotal);
+          appliedCouponCode = coupon.code;
+          await storage.incrementCouponUses(coupon.id);
+        }
+      }
+    }
+    const total = subtotal - discountAmount + shippingCost;
+    const orderNotes2 = [notes, `__sessionId:${sessionId}`].filter(Boolean).join("\n");
+    const order = await storage.createOrder({
+      customerId: req.customerId,
+      status: "pending",
+      addressId: null,
+      subtotal: subtotal.toFixed(2),
+      shippingCost: shippingCost.toFixed(2),
+      total: total.toFixed(2),
+      paymentMethod: (process.env.PAYMENT_MODE || "mercadopago") === "whatsapp" ? "whatsapp_pix" : "mercadopago",
+      paymentStatus: "pending",
+      paymentExternalId: null,
+      mpPreferenceId: null,
+      shippingTrackingCode: null,
+      shippingAddress: address || null,
+      shippingServiceId: shippingOption?.melhorEnvioId ?? null,
+      shippingLabelUrl: null,
+      couponCode: appliedCouponCode,
+      discountAmount: discountAmount.toFixed(2),
+      notes: orderNotes2
+    });
+    console.log(`[Checkout] Order ${order.id} created: shippingAddress=${address ? "yes" : "no"}, shippingServiceId=${shippingOption?.melhorEnvioId ?? "none"}`);
+    const uniqueProductIds = Array.from(new Set(cartItemsList.map((i) => i.productId)));
+    const productResults = await Promise.all(uniqueProductIds.map((id) => storage.getProductById(id)));
+    const prodMap = new Map(productResults.filter(Boolean).map((p) => [p.id, p.name]));
+    const orderItemsData = cartItemsList.map((item) => ({
+      orderId: order.id,
+      productId: item.productId,
+      variantId: item.variantId,
+      productName: prodMap.get(item.productId) ?? "Produto Gr\xE1fica",
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: (parseFloat(item.unitPrice) * item.quantity).toFixed(2),
+      specifications: item.specifications,
+      artFileUrl: item.artFileUrl,
+      artStatus: item.artFileUrl ? "uploaded" : "pending"
+    }));
+    await storage.addOrderItems(orderItemsData);
+    const paymentMode = process.env.PAYMENT_MODE || "mercadopago";
+    if (paymentMode === "whatsapp") {
+      await storage.clearCart(sessionId);
+      const itemsSummary = orderItemsData.map((item) => ({
+        name: item.productName,
+        quantity: item.quantity,
+        unitPrice: parseFloat(item.unitPrice),
+        subtotal: parseFloat(item.subtotal)
+      }));
+      res.status(201).json({
+        paymentMode: "whatsapp",
+        orderId: order.id,
+        customerName: customerName || "Cliente",
+        itemsSummary,
+        subtotal,
+        discountAmount,
+        couponCode: appliedCouponCode,
+        shippingCost,
+        shippingService: shippingOption ? `${shippingOption.carrier} - ${shippingOption.service}` : null,
+        total,
+        address: address || null,
+        whatsappNumber: process.env.WHATSAPP_NUMBER || ""
+      });
+      return;
+    }
+    try {
+      const preferenceItems = cartItemsList.map((item) => ({
+        id: item.productId,
+        title: prodMap.get(item.productId) ?? "Produto Gr\xE1fica",
+        quantity: item.quantity,
+        unit_price: parseFloat(parseFloat(item.unitPrice).toFixed(2))
+      }));
+      const preference = await createPreference({
+        orderId: order.id,
+        items: preferenceItems,
+        shippingCost,
+        discountAmount,
+        payer: {
+          name: customerName || "Cliente",
+          email: customerEmail || "guest@kairos.com.br",
+          phone: customerPhone
+        }
+      });
+      await storage.updatePaymentStatus(order.id, "pending", preference.preferenceId);
+      res.status(201).json({
+        orderId: order.id,
+        total,
+        preferenceId: preference.preferenceId,
+        initPoint: preference.initPoint,
+        sandboxInitPoint: preference.sandboxInitPoint
+      });
+    } catch (err) {
+      console.error("[Checkout] MercadoPago preference creation failed:");
+      console.error("  message:", err?.message);
+      console.error("  status:", err?.status);
+      console.error("  cause:", JSON.stringify(err?.cause ?? err, null, 2));
+      res.status(201).json({
+        orderId: order.id,
+        total,
+        paymentError: "Erro ao criar prefer\xEAncia de pagamento. Tente novamente."
+      });
+    }
+  });
+  const ALLOWED_MIMES = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+    "application/postscript",
+    "application/illustrator",
+    "application/eps"
+  ];
+  const MAX_FILE_SIZE = 50 * 1024 * 1024;
+  const upload = (0, import_multer.default)({
+    storage: import_multer.default.memoryStorage(),
+    limits: { fileSize: MAX_FILE_SIZE },
+    fileFilter: (_req, file, cb) => {
+      if (ALLOWED_MIMES.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error("Formato n\xE3o suportado. Envie PDF, JPG, PNG, TIFF, AI ou EPS."));
+      }
+    }
+  });
+  app2.post("/api/grafica/upload", requireAuth, upload.single("file"), async (req, res) => {
+    const { orderItemId } = req.body;
+    if (!req.file) {
+      res.status(400).json({ message: "Nenhum arquivo enviado" });
+      return;
+    }
+    if (!orderItemId) {
+      res.status(400).json({ message: "orderItemId \xE9 obrigat\xF3rio" });
+      return;
+    }
+    const orderItem = await storage.getOrderItemById(orderItemId);
+    if (!orderItem) {
+      res.status(404).json({ message: "Item do pedido n\xE3o encontrado" });
+      return;
+    }
+    try {
+      const url = await uploadArtFile({
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalname: req.file.originalname,
+        orderId: orderItem.orderId,
+        orderItemId
+      });
+      await storage.updateOrderItemArt(orderItemId, url, "uploaded");
+      res.json({
+        uploadUrl: url,
+        fileId: randomUUID(),
+        status: "accepted"
+      });
+    } catch (err) {
+      console.error("[Upload] Error:", err?.message || err);
+      res.status(500).json({ message: err?.message || "Erro ao fazer upload do arquivo" });
+    }
+  });
+  app2.post("/api/grafica/coupons/validate", async (req, res) => {
+    const { code, subtotal } = req.body;
+    if (!code || typeof code !== "string") {
+      res.status(400).json({ valid: false, message: "C\xF3digo do cupom \xE9 obrigat\xF3rio" });
+      return;
+    }
+    const coupon = await storage.getCouponByCode(code);
+    if (!coupon || !coupon.active) {
+      res.json({ valid: false, message: "Cupom n\xE3o encontrado ou inativo" });
+      return;
+    }
+    const now = /* @__PURE__ */ new Date();
+    if (now < new Date(coupon.validFrom) || now > new Date(coupon.validTo)) {
+      res.json({ valid: false, message: "Cupom fora do per\xEDodo de validade" });
+      return;
+    }
+    if (coupon.maxUses !== null && coupon.currentUses >= coupon.maxUses) {
+      res.json({ valid: false, message: "Cupom atingiu o limite de usos" });
+      return;
+    }
+    const orderSubtotal = parseFloat(subtotal) || 0;
+    if (orderSubtotal < parseFloat(coupon.minOrderAmount)) {
+      res.json({ valid: false, message: `Pedido m\xEDnimo de R$ ${parseFloat(coupon.minOrderAmount).toFixed(2)}` });
+      return;
+    }
+    let discountAmount = 0;
+    if (coupon.discountType === "percentage") {
+      discountAmount = orderSubtotal * parseFloat(coupon.discountValue) / 100;
+    } else {
+      discountAmount = parseFloat(coupon.discountValue);
+    }
+    discountAmount = Math.min(discountAmount, orderSubtotal);
+    res.json({
+      valid: true,
+      code: coupon.code,
+      discountType: coupon.discountType,
+      discountValue: coupon.discountValue,
+      discountAmount: parseFloat(discountAmount.toFixed(2)),
+      message: coupon.discountType === "percentage" ? `${parseFloat(coupon.discountValue)}% de desconto aplicado!` : `Desconto de R$ ${parseFloat(coupon.discountValue).toFixed(2)} aplicado!`
+    });
+  });
+  app2.get("/api/grafica/orders/:id/tracking", async (req, res) => {
+    const order = await storage.getOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    if (!order.shippingTrackingCode) {
+      res.json({ trackingCode: null, events: [] });
+      return;
+    }
+    const events = await getTrackingInfo(order.shippingTrackingCode);
+    res.json({ trackingCode: order.shippingTrackingCode, events });
+  });
+  app2.post("/api/grafica/orders/:id/cancel", requireAuth, async (req, res) => {
+    const order = await storage.getOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    if (order.customerId !== req.customerId) {
+      res.status(403).json({ message: "Acesso negado" });
+      return;
+    }
+    if (!["pending", "confirmed"].includes(order.status)) {
+      res.status(400).json({ message: "Este pedido n\xE3o pode mais ser cancelado" });
+      return;
+    }
+    await storage.updateOrderStatus(order.id, "cancelled");
+    if (order.paymentStatus === "approved" && order.paymentExternalId) {
+      createRefund(order.paymentExternalId).then(() => storage.updatePaymentStatus(order.id, "refunded")).catch((err) => console.error(`[Cancel] Refund failed for order ${order.id}:`, err?.message));
+    }
+    triggerOrderEmail(order.id, "cancelled").catch(() => {
+    });
+    res.json({ message: "Pedido cancelado com sucesso" });
+  });
+  app2.get("/api/grafica/account/orders", requireAuth, async (req, res) => {
+    const orders2 = await storage.getOrdersByCustomer(req.customerId);
+    res.json(orders2);
+  });
+  app2.get("/api/grafica/account/addresses", requireAuth, async (req, res) => {
+    const addresses2 = await storage.getAddressesByCustomer(req.customerId);
+    res.json(addresses2);
+  });
+  app2.post("/api/grafica/account/addresses", requireAuth, validate(createAddressSchema), async (req, res) => {
+    const address = await storage.createAddress({
+      ...req.body,
+      customerId: req.customerId
+    });
+    res.status(201).json(address);
+  });
+  app2.patch("/api/grafica/account/addresses/:id", requireAuth, validate(updateAddressSchema), async (req, res) => {
+    const addrId = req.params.id;
+    const existing = await storage.getAddress(addrId);
+    if (!existing || existing.customerId !== req.customerId) {
+      res.status(404).json({ message: "Endere\xE7o n\xE3o encontrado" });
+      return;
+    }
+    const updated = await storage.updateAddress(addrId, req.body);
+    res.json(updated);
+  });
+  app2.delete("/api/grafica/account/addresses/:id", requireAuth, async (req, res) => {
+    const addrId = req.params.id;
+    const existing = await storage.getAddress(addrId);
+    if (!existing || existing.customerId !== req.customerId) {
+      res.status(404).json({ message: "Endere\xE7o n\xE3o encontrado" });
+      return;
+    }
+    await storage.deleteAddress(addrId);
+    res.status(204).send();
+  });
+  app2.patch("/api/grafica/account/profile", requireAuth, validate(updateProfileSchema), async (req, res) => {
+    const updated = await storage.updateCustomer(req.customerId, req.body);
+    if (!updated) {
+      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
+      return;
+    }
+    res.json({ id: updated.id, name: updated.name, email: updated.email, phone: updated.phone });
+  });
+  app2.post("/api/grafica/account/change-password", requireAuth, validate(changePasswordSchema), async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const customer = await storage.getCustomer(req.customerId);
+    if (!customer) {
+      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
+      return;
+    }
+    const valid = await verifyPassword(currentPassword, customer.passwordHash);
+    if (!valid) {
+      res.status(400).json({ message: "Senha atual incorreta" });
+      return;
+    }
+    const newHash = await hashPassword(newPassword);
+    await storage.updateCustomer(req.customerId, { passwordHash: newHash });
+    res.json({ message: "Senha alterada com sucesso" });
+  });
+  app2.get("/api/grafica/orders/:id/payment-status", async (req, res) => {
+    const order = await storage.getOrder(req.params.id);
+    if (!order) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    res.json({
+      orderId: order.id,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod
+    });
+  });
+  app2.post("/api/grafica/orders/:id/verify-payment", async (req, res) => {
+    const orderId = req.params.id;
+    const { paymentId } = req.body;
+    const order = await storage.getOrder(orderId);
+    if (!order) {
+      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
+      return;
+    }
+    if (order.paymentStatus === "approved") {
+      res.json({
+        orderId: order.id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        updated: false
+      });
+      return;
+    }
+    if (!paymentId) {
+      res.json({
+        orderId: order.id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        updated: false
+      });
+      return;
+    }
+    try {
+      const payment = await getPayment(String(paymentId));
+      console.log(`[VerifyPayment] Order ${orderId}: MP payment ${paymentId} status=${payment.status}`);
+      if (payment.externalReference !== orderId) {
+        console.warn(`[VerifyPayment] Payment ${paymentId} ref=${payment.externalReference} does not match order ${orderId}`);
+        res.status(400).json({ message: "Pagamento n\xE3o corresponde ao pedido" });
+        return;
+      }
+      const { orderStatus, paymentStatus } = mapPaymentStatus(payment.status);
+      if (order.paymentStatus !== paymentStatus) {
+        await storage.updatePaymentStatus(orderId, paymentStatus, String(paymentId));
+        await storage.updateOrderStatus(orderId, orderStatus);
+        console.log(`[VerifyPayment] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}`);
+        if (paymentStatus === "approved" && order.notes) {
+          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
+          if (sessionMatch) {
+            await storage.clearCart(sessionMatch[1]);
+          }
+        }
+        if (paymentStatus === "approved") {
+          autoGenerateLabel(orderId).catch(() => {
+          });
+        }
+        triggerOrderEmail(orderId, orderStatus).catch(() => {
+        });
+      }
+      res.json({
+        orderId: order.id,
+        status: orderStatus,
+        paymentStatus,
+        updated: order.paymentStatus !== paymentStatus
+      });
+    } catch (err) {
+      console.error(`[VerifyPayment] Error verifying payment ${paymentId}:`, err?.message || err);
+      res.json({
+        orderId: order.id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        updated: false,
+        error: "N\xE3o foi poss\xEDvel verificar o pagamento"
+      });
+    }
+  });
+  app2.post("/api/webhooks/mercadopago", async (req, res) => {
+    try {
+      const webhookSecret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+      if (webhookSecret) {
+        const xSignature = req.headers["x-signature"];
+        const xRequestId = req.headers["x-request-id"];
+        const dataId = req.query["data.id"] || req.body?.data?.id || "";
+        if (!xSignature) {
+          console.warn("[Webhook] Missing x-signature header");
+          res.status(401).json({ message: "Assinatura ausente" });
+          return;
+        }
+        const parts = Object.fromEntries(
+          xSignature.split(",").map((p) => {
+            const [k, ...v] = p.split("=");
+            return [k.trim(), v.join("=")];
+          })
+        );
+        const ts = parts["ts"];
+        const v13 = parts["v1"];
+        if (!ts || !v13) {
+          console.warn("[Webhook] Invalid x-signature format");
+          res.status(401).json({ message: "Formato de assinatura inv\xE1lido" });
+          return;
+        }
+        const template = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
+        const computed = createHmac("sha256", webhookSecret).update(template).digest("hex");
+        try {
+          const valid = timingSafeEqual(Buffer.from(computed), Buffer.from(v13));
+          if (!valid) {
+            console.warn("[Webhook] Signature mismatch");
+            res.status(401).json({ message: "Assinatura inv\xE1lida" });
+            return;
+          }
+        } catch {
+          console.warn("[Webhook] Signature comparison failed");
+          res.status(401).json({ message: "Assinatura inv\xE1lida" });
+          return;
+        }
+      } else {
+        console.warn("[Webhook] MERCADOPAGO_WEBHOOK_SECRET not set \u2014 skipping signature validation");
+      }
+      const { type, data } = req.body;
+      if (type !== "payment" || !data?.id) {
+        res.status(200).json({ received: true, processed: false });
+        return;
+      }
+      const paymentId = String(data.id);
+      console.log(`[Webhook] Payment notification received: ${paymentId}`);
+      const payment = await getPayment(paymentId);
+      console.log(`[Webhook] Payment ${paymentId}: status=${payment.status}, ref=${payment.externalReference}`);
+      if (!payment.externalReference) {
+        console.warn(`[Webhook] Payment ${paymentId} has no external_reference, skipping.`);
+        res.status(200).json({ received: true, processed: false });
+        return;
+      }
+      const orderId = payment.externalReference;
+      const order = await storage.getOrder(orderId);
+      if (!order) {
+        console.warn(`[Webhook] Order ${orderId} not found for payment ${paymentId}`);
+        res.status(200).json({ received: true, processed: false });
+        return;
+      }
+      const { orderStatus, paymentStatus } = mapPaymentStatus(payment.status);
+      mapPaymentMethod(payment.paymentTypeId);
+      if (order.paymentStatus !== paymentStatus) {
+        await storage.updatePaymentStatus(orderId, paymentStatus, paymentId);
+        await storage.updateOrderStatus(orderId, orderStatus);
+        console.log(`[Webhook] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}`);
+        if (paymentStatus === "approved" && order.notes) {
+          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
+          if (sessionMatch) {
+            await storage.clearCart(sessionMatch[1]);
+            console.log(`[Webhook] Cart cleared for session ${sessionMatch[1]}`);
+          }
+        }
+        if (paymentStatus === "approved") {
+          autoGenerateLabel(orderId).catch(() => {
+          });
+        }
+        triggerOrderEmail(orderId, orderStatus).catch(() => {
+        });
+      }
+      res.status(200).json({ received: true, processed: true });
+    } catch (err) {
+      console.error("[Webhook] Error processing notification:", err?.message || err);
+      res.status(200).json({ received: true, error: true });
+    }
+  });
+}
+
+// server/middleware/admin-auth.ts
+function requireAdmin(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ message: "Autentica\xE7\xE3o administrativa necess\xE1ria" });
+    return;
+  }
+  const token = authHeader.slice(7);
+  const payload = verifyAdminToken(token);
+  if (!payload) {
+    res.status(401).json({ message: "Token administrativo inv\xE1lido ou expirado" });
+    return;
+  }
+  storage.getAdminUser(payload.adminUserId).then((admin) => {
+    if (!admin || !admin.active) {
+      res.status(401).json({ message: "Conta administrativa desativada" });
+      return;
+    }
+    req.adminUserId = payload.adminUserId;
+    req.adminRole = payload.role;
+    next();
+  }).catch(() => {
+    res.status(500).json({ message: "Erro ao verificar credenciais" });
+  });
+}
+function requireRole(...roles) {
+  return (req, res, next) => {
+    requireAdmin(req, res, () => {
+      if (req.adminRole === "admin" || roles.includes(req.adminRole)) {
+        next();
+        return;
+      }
+      res.status(403).json({ message: "Permiss\xE3o insuficiente" });
+    });
+  };
+}
+
+// server/routes/admin.ts
+var import_multer2 = __toESM(require_multer(), 1);
 function str(val) {
   if (Array.isArray(val)) return val[0] || "";
   return val || "";
@@ -98002,8 +98755,8 @@ async function audit(adminUserId, action, entityType, entityId, details, ip) {
   }
 }
 function registerAdminRoutes(app2) {
-  const imageUpload = (0, import_multer.default)({
-    storage: import_multer.default.memoryStorage(),
+  const imageUpload = (0, import_multer2.default)({
+    storage: import_multer2.default.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
     // 5MB
     fileFilter: (_req, file, cb) => {
@@ -98698,7 +99451,6 @@ function registerAdminRoutes(app2) {
 }
 
 // server/routes.ts
-var import_multer2 = __toESM(require_multer(), 1);
 async function registerRoutes(httpServer2, app2) {
   app2.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() });
@@ -98749,762 +99501,8 @@ Sitemap: ${siteUrl}/sitemap.xml
     const steps = await storage.getAllEstrategiaSteps();
     res.json(steps);
   });
-  app2.get("/api/grafica/categories", async (_req, res) => {
-    const categories2 = await storage.getCategories();
-    const result = await Promise.all(
-      categories2.map(async (cat) => {
-        const productCount = await storage.getProductCountByCategory(cat.id);
-        return { ...cat, productCount };
-      })
-    );
-    res.json(result);
-  });
-  app2.get("/api/grafica/categories/:slug", async (req, res) => {
-    const category = await storage.getCategoryBySlug(req.params.slug);
-    if (!category) {
-      res.status(404).json({ message: "Categoria n\xE3o encontrada" });
-      return;
-    }
-    const products2 = await storage.getProductsByCategory(category.id);
-    const productsWithPrice = await Promise.all(
-      products2.map(async (product) => {
-        const rules = await storage.getPriceRules(product.id);
-        const prices = rules.map((r) => parseFloat(r.pricePerUnit));
-        const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
-        return { ...product, priceRange };
-      })
-    );
-    const result = {
-      ...category,
-      products: productsWithPrice
-    };
-    res.json(result);
-  });
-  app2.get("/api/grafica/products/:slug", async (req, res) => {
-    const product = await storage.getProductBySlug(req.params.slug);
-    if (!product) {
-      res.status(404).json({ message: "Produto n\xE3o encontrado" });
-      return;
-    }
-    const category = await storage.getCategoryById(product.categoryId);
-    if (!category) {
-      res.status(404).json({ message: "Categoria do produto n\xE3o encontrada" });
-      return;
-    }
-    const variants = await storage.getProductVariants(product.id);
-    const priceRules2 = await storage.getPriceRules(product.id);
-    const allPapers = await storage.getPaperTypes();
-    const allFinishings = await storage.getFinishings();
-    const usedPaperIds = new Set(variants.map((v) => v.paperTypeId));
-    const usedFinishingIds = new Set(
-      variants.map((v) => v.finishingId).filter(Boolean)
-    );
-    const prices = priceRules2.map((r) => parseFloat(r.pricePerUnit));
-    const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
-    const result = {
-      ...product,
-      category,
-      variants,
-      availablePapers: allPapers.filter((p) => usedPaperIds.has(p.id)),
-      availableFinishings: allFinishings.filter((f) => usedFinishingIds.has(f.id)),
-      priceRange,
-      priceRules: priceRules2
-    };
-    res.json(result);
-  });
-  app2.get("/api/grafica/search", async (req, res) => {
-    const q = (req.query.q || "").trim();
-    if (q.length < 2) {
-      res.json([]);
-      return;
-    }
-    const products2 = await storage.searchProducts(q);
-    const enriched = await Promise.all(
-      products2.map(async (product) => {
-        const rules = await storage.getPriceRules(product.id);
-        const prices = rules.map((r) => parseFloat(r.pricePerUnit));
-        const priceRange = prices.length > 0 ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
-        return { ...product, priceRange };
-      })
-    );
-    res.json(enriched);
-  });
-  app2.get("/api/grafica/paper-types", async (_req, res) => {
-    const paperTypes2 = await storage.getPaperTypes();
-    res.json(paperTypes2);
-  });
-  app2.get("/api/grafica/finishings", async (_req, res) => {
-    const finishings2 = await storage.getFinishings();
-    res.json(finishings2);
-  });
-  app2.get("/api/grafica/cart/:sessionId", async (req, res) => {
-    const items = await storage.getCartItems(req.params.sessionId);
-    const uniqueProductIds = Array.from(new Set(items.map((i) => i.productId)));
-    const productResults = await Promise.all(uniqueProductIds.map((id) => storage.getProductById(id)));
-    const productMap = new Map(productResults.filter(Boolean).map((p) => [p.id, p]));
-    const itemsWithProducts = await Promise.all(
-      items.map(async (item) => {
-        const product = productMap.get(item.productId);
-        let variant;
-        if (product && item.variantId) {
-          const variants = await storage.getProductVariants(product.id);
-          variant = variants.find((v) => v.id === item.variantId);
-        }
-        return { ...item, product, variant };
-      })
-    );
-    const validItems = itemsWithProducts.filter((i) => i.product);
-    const subtotal = validItems.reduce(
-      (sum2, item) => sum2 + parseFloat(item.unitPrice) * item.quantity,
-      0
-    );
-    res.json({
-      items: validItems,
-      itemCount: validItems.reduce((sum2, item) => sum2 + item.quantity, 0),
-      subtotal
-    });
-  });
-  app2.post("/api/grafica/cart", validate(addCartItemSchema), async (req, res) => {
-    const cartItem = await storage.addCartItem(req.body);
-    res.status(201).json(cartItem);
-  });
-  app2.patch("/api/grafica/cart/:id", validate(updateCartItemSchema), async (req, res) => {
-    const { quantity } = req.body;
-    const updated = await storage.updateCartItem(req.params.id, quantity);
-    if (!updated) {
-      res.status(404).json({ message: "Item n\xE3o encontrado" });
-      return;
-    }
-    res.json(updated);
-  });
-  app2.delete("/api/grafica/cart/item/:id", async (req, res) => {
-    await storage.removeCartItem(req.params.id);
-    res.status(204).send();
-  });
-  app2.delete("/api/grafica/cart/session/:sessionId", async (req, res) => {
-    await storage.clearCart(req.params.sessionId);
-    res.status(204).send();
-  });
-  app2.post("/api/grafica/orders", async (req, res) => {
-    const order = await storage.createOrder(req.body);
-    if (req.body.items) {
-      const orderItemsToInsert = req.body.items.map((item) => ({
-        ...item,
-        orderId: order.id
-      }));
-      await storage.addOrderItems(orderItemsToInsert);
-    }
-    res.status(201).json(order);
-  });
-  app2.get("/api/grafica/orders/:id", async (req, res) => {
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    const items = await storage.getOrderItems(order.id);
-    res.json({ ...order, items });
-  });
-  app2.patch("/api/grafica/orders/:id/status", validate(updateStatusSchema), async (req, res) => {
-    const { status } = req.body;
-    const updated = await storage.updateOrderStatus(req.params.id, status);
-    if (!updated) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    res.json(updated);
-  });
-  app2.post("/api/grafica/shipping/quote", async (req, res) => {
-    const { cep, sessionId } = req.body;
-    const cleanCep = (cep || "").replace(/\D/g, "");
-    if (cleanCep.length !== 8) {
-      res.status(400).json({ message: "CEP inv\xE1lido" });
-      return;
-    }
-    try {
-      const items = sessionId ? await storage.getCartItems(sessionId) : [];
-      const quotes = await calculateShipping({
-        destinationCep: cleanCep,
-        items
-      });
-      res.json(quotes);
-    } catch (err) {
-      console.error("[Shipping] Quote error:", err?.message || err);
-      res.json([
-        { carrier: "Correios", service: "PAC", price: 18.9, deliveryDays: 8 },
-        { carrier: "Correios", service: "SEDEX", price: 32.5, deliveryDays: 3 },
-        { carrier: "Jadlog", service: ".Package", price: 22.4, deliveryDays: 5 }
-      ]);
-    }
-  });
-  app2.get("/api/grafica/address/:cep", async (req, res) => {
-    const cep = req.params.cep.replace(/\D/g, "");
-    if (cep.length !== 8) {
-      res.status(400).json({ message: "CEP inv\xE1lido" });
-      return;
-    }
-    try {
-      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-      const data = await response.json();
-      if (data.erro) {
-        res.status(404).json({ message: "CEP n\xE3o encontrado" });
-        return;
-      }
-      res.json({
-        cep: data.cep,
-        street: data.logradouro,
-        neighborhood: data.bairro,
-        city: data.localidade,
-        state: data.uf,
-        complement: data.complemento
-      });
-    } catch {
-      res.status(500).json({ message: "Erro ao consultar CEP" });
-    }
-  });
-  app2.post("/api/grafica/auth/register", authLimiter, validate(registerSchema), async (req, res) => {
-    const { name, email, phone, password } = req.body;
-    const existing = await storage.getCustomerByEmail(email);
-    if (existing) {
-      res.status(409).json({ message: "E-mail j\xE1 cadastrado" });
-      return;
-    }
-    const passwordHash = await hashPassword(password);
-    const customer = await storage.createCustomer({ name, email, phone: phone || null, passwordHash });
-    const token = generateToken(customer.id);
-    sendWelcomeEmail(email, name).catch(() => {
-    });
-    res.status(201).json({
-      token,
-      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone }
-    });
-  });
-  app2.post("/api/grafica/auth/login", authLimiter, validate(loginSchema), async (req, res) => {
-    const { email, password } = req.body;
-    const customer = await storage.getCustomerByEmail(email);
-    if (!customer) {
-      res.status(401).json({ message: "E-mail ou senha incorretos" });
-      return;
-    }
-    const valid = await verifyPassword(password, customer.passwordHash);
-    if (!valid) {
-      res.status(401).json({ message: "E-mail ou senha incorretos" });
-      return;
-    }
-    const token = generateToken(customer.id);
-    res.json({
-      token,
-      customer: { id: customer.id, name: customer.name, email: customer.email, phone: customer.phone }
-    });
-  });
-  app2.get("/api/grafica/auth/me", requireAuth, async (req, res) => {
-    const customer = await storage.getCustomer(req.customerId);
-    if (!customer) {
-      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
-      return;
-    }
-    res.json({ id: customer.id, name: customer.name, email: customer.email, phone: customer.phone });
-  });
-  app2.post("/api/grafica/checkout", checkoutLimiter, requireAuth, validate(checkoutSchema), async (req, res) => {
-    const { sessionId, customerName, customerEmail, customerPhone, address, shippingOption, notes, couponCode } = req.body;
-    const cartItemsList = await storage.getCartItems(sessionId);
-    if (cartItemsList.length === 0) {
-      res.status(400).json({ message: "Carrinho vazio" });
-      return;
-    }
-    const subtotal = cartItemsList.reduce(
-      (sum2, item) => sum2 + parseFloat(item.unitPrice) * item.quantity,
-      0
-    );
-    const shippingCost = shippingOption?.price || 0;
-    let discountAmount = 0;
-    let appliedCouponCode = null;
-    if (couponCode) {
-      const coupon = await storage.getCouponByCode(couponCode);
-      if (coupon && coupon.active) {
-        const now = /* @__PURE__ */ new Date();
-        const inPeriod = now >= new Date(coupon.validFrom) && now <= new Date(coupon.validTo);
-        const hasUses = coupon.maxUses === null || coupon.currentUses < coupon.maxUses;
-        const meetsMin = subtotal >= parseFloat(coupon.minOrderAmount);
-        if (inPeriod && hasUses && meetsMin) {
-          if (coupon.discountType === "percentage") {
-            discountAmount = subtotal * parseFloat(coupon.discountValue) / 100;
-          } else {
-            discountAmount = parseFloat(coupon.discountValue);
-          }
-          discountAmount = Math.min(discountAmount, subtotal);
-          appliedCouponCode = coupon.code;
-          await storage.incrementCouponUses(coupon.id);
-        }
-      }
-    }
-    const total = subtotal - discountAmount + shippingCost;
-    const orderNotes2 = [notes, `__sessionId:${sessionId}`].filter(Boolean).join("\n");
-    const order = await storage.createOrder({
-      customerId: req.customerId,
-      status: "pending",
-      addressId: null,
-      subtotal: subtotal.toFixed(2),
-      shippingCost: shippingCost.toFixed(2),
-      total: total.toFixed(2),
-      paymentMethod: (process.env.PAYMENT_MODE || "mercadopago") === "whatsapp" ? "whatsapp_pix" : "mercadopago",
-      paymentStatus: "pending",
-      paymentExternalId: null,
-      mpPreferenceId: null,
-      shippingTrackingCode: null,
-      shippingAddress: address || null,
-      shippingServiceId: shippingOption?.melhorEnvioId ?? null,
-      shippingLabelUrl: null,
-      couponCode: appliedCouponCode,
-      discountAmount: discountAmount.toFixed(2),
-      notes: orderNotes2
-    });
-    console.log(`[Checkout] Order ${order.id} created: shippingAddress=${address ? "yes" : "no"}, shippingServiceId=${shippingOption?.melhorEnvioId ?? "none"}`);
-    const uniqueProductIds = Array.from(new Set(cartItemsList.map((i) => i.productId)));
-    const productResults = await Promise.all(uniqueProductIds.map((id) => storage.getProductById(id)));
-    const prodMap = new Map(productResults.filter(Boolean).map((p) => [p.id, p.name]));
-    const orderItemsData = cartItemsList.map((item) => ({
-      orderId: order.id,
-      productId: item.productId,
-      variantId: item.variantId,
-      productName: prodMap.get(item.productId) ?? "Produto Gr\xE1fica",
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      subtotal: (parseFloat(item.unitPrice) * item.quantity).toFixed(2),
-      specifications: item.specifications,
-      artFileUrl: item.artFileUrl,
-      artStatus: item.artFileUrl ? "uploaded" : "pending"
-    }));
-    await storage.addOrderItems(orderItemsData);
-    const paymentMode = process.env.PAYMENT_MODE || "mercadopago";
-    if (paymentMode === "whatsapp") {
-      await storage.clearCart(sessionId);
-      const itemsSummary = orderItemsData.map((item) => ({
-        name: item.productName,
-        quantity: item.quantity,
-        unitPrice: parseFloat(item.unitPrice),
-        subtotal: parseFloat(item.subtotal)
-      }));
-      const selectedQuote = shippingOption || null;
-      res.status(201).json({
-        paymentMode: "whatsapp",
-        orderId: order.id,
-        customerName: customerName || "Cliente",
-        itemsSummary,
-        subtotal,
-        discountAmount,
-        couponCode: appliedCouponCode,
-        shippingCost,
-        shippingService: selectedQuote ? `${selectedQuote.carrier} - ${selectedQuote.service}` : null,
-        total,
-        address: address || null,
-        whatsappNumber: process.env.WHATSAPP_NUMBER || ""
-      });
-      return;
-    }
-    try {
-      const preferenceItems = cartItemsList.map((item) => ({
-        id: item.productId,
-        title: prodMap.get(item.productId) ?? "Produto Gr\xE1fica",
-        quantity: item.quantity,
-        unit_price: parseFloat(parseFloat(item.unitPrice).toFixed(2))
-      }));
-      const preference = await createPreference({
-        orderId: order.id,
-        items: preferenceItems,
-        shippingCost,
-        discountAmount,
-        payer: {
-          name: customerName || "Cliente",
-          email: customerEmail || "guest@kairos.com.br",
-          phone: customerPhone
-        }
-      });
-      await storage.updatePaymentStatus(order.id, "pending", preference.preferenceId);
-      res.status(201).json({
-        orderId: order.id,
-        total,
-        preferenceId: preference.preferenceId,
-        initPoint: preference.initPoint,
-        sandboxInitPoint: preference.sandboxInitPoint
-      });
-    } catch (err) {
-      console.error("[Checkout] MercadoPago preference creation failed:");
-      console.error("  message:", err?.message);
-      console.error("  status:", err?.status);
-      console.error("  cause:", JSON.stringify(err?.cause ?? err, null, 2));
-      res.status(201).json({
-        orderId: order.id,
-        total,
-        paymentError: "Erro ao criar prefer\xEAncia de pagamento. Tente novamente."
-      });
-    }
-  });
-  const ALLOWED_MIMES = [
-    "application/pdf",
-    "image/jpeg",
-    "image/png",
-    "image/tiff",
-    "application/postscript",
-    // .ai / .eps
-    "application/illustrator",
-    // .ai
-    "application/eps"
-    // .eps
-  ];
-  const MAX_FILE_SIZE = 50 * 1024 * 1024;
-  const upload = (0, import_multer2.default)({
-    storage: import_multer2.default.memoryStorage(),
-    limits: { fileSize: MAX_FILE_SIZE },
-    fileFilter: (_req, file, cb) => {
-      if (ALLOWED_MIMES.includes(file.mimetype)) {
-        cb(null, true);
-      } else {
-        cb(new Error("Formato n\xE3o suportado. Envie PDF, JPG, PNG, TIFF, AI ou EPS."));
-      }
-    }
-  });
-  app2.post("/api/grafica/upload", requireAuth, upload.single("file"), async (req, res) => {
-    const { orderItemId } = req.body;
-    if (!req.file) {
-      res.status(400).json({ message: "Nenhum arquivo enviado" });
-      return;
-    }
-    if (!orderItemId) {
-      res.status(400).json({ message: "orderItemId \xE9 obrigat\xF3rio" });
-      return;
-    }
-    const orderItem = await storage.getOrderItemById(orderItemId);
-    if (!orderItem) {
-      res.status(404).json({ message: "Item do pedido n\xE3o encontrado" });
-      return;
-    }
-    try {
-      const url = await uploadArtFile({
-        buffer: req.file.buffer,
-        mimetype: req.file.mimetype,
-        originalname: req.file.originalname,
-        orderId: orderItem.orderId,
-        orderItemId
-      });
-      await storage.updateOrderItemArt(orderItemId, url, "uploaded");
-      res.json({
-        uploadUrl: url,
-        fileId: randomUUID(),
-        status: "accepted"
-      });
-    } catch (err) {
-      console.error("[Upload] Error:", err?.message || err);
-      res.status(500).json({ message: err?.message || "Erro ao fazer upload do arquivo" });
-    }
-  });
-  app2.post("/api/grafica/coupons/validate", async (req, res) => {
-    const { code, subtotal } = req.body;
-    if (!code || typeof code !== "string") {
-      res.status(400).json({ valid: false, message: "C\xF3digo do cupom \xE9 obrigat\xF3rio" });
-      return;
-    }
-    const coupon = await storage.getCouponByCode(code);
-    if (!coupon || !coupon.active) {
-      res.json({ valid: false, message: "Cupom n\xE3o encontrado ou inativo" });
-      return;
-    }
-    const now = /* @__PURE__ */ new Date();
-    if (now < new Date(coupon.validFrom) || now > new Date(coupon.validTo)) {
-      res.json({ valid: false, message: "Cupom fora do per\xEDodo de validade" });
-      return;
-    }
-    if (coupon.maxUses !== null && coupon.currentUses >= coupon.maxUses) {
-      res.json({ valid: false, message: "Cupom atingiu o limite de usos" });
-      return;
-    }
-    const orderSubtotal = parseFloat(subtotal) || 0;
-    if (orderSubtotal < parseFloat(coupon.minOrderAmount)) {
-      res.json({ valid: false, message: `Pedido m\xEDnimo de R$ ${parseFloat(coupon.minOrderAmount).toFixed(2)}` });
-      return;
-    }
-    let discountAmount = 0;
-    if (coupon.discountType === "percentage") {
-      discountAmount = orderSubtotal * parseFloat(coupon.discountValue) / 100;
-    } else {
-      discountAmount = parseFloat(coupon.discountValue);
-    }
-    discountAmount = Math.min(discountAmount, orderSubtotal);
-    res.json({
-      valid: true,
-      code: coupon.code,
-      discountType: coupon.discountType,
-      discountValue: coupon.discountValue,
-      discountAmount: parseFloat(discountAmount.toFixed(2)),
-      message: coupon.discountType === "percentage" ? `${parseFloat(coupon.discountValue)}% de desconto aplicado!` : `Desconto de R$ ${parseFloat(coupon.discountValue).toFixed(2)} aplicado!`
-    });
-  });
-  app2.get("/api/grafica/orders/:id/tracking", async (req, res) => {
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    if (!order.shippingTrackingCode) {
-      res.json({ trackingCode: null, events: [] });
-      return;
-    }
-    const events = await getTrackingInfo(order.shippingTrackingCode);
-    res.json({ trackingCode: order.shippingTrackingCode, events });
-  });
-  app2.post("/api/grafica/orders/:id/cancel", requireAuth, async (req, res) => {
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    if (order.customerId !== req.customerId) {
-      res.status(403).json({ message: "Acesso negado" });
-      return;
-    }
-    if (!["pending", "confirmed"].includes(order.status)) {
-      res.status(400).json({ message: "Este pedido n\xE3o pode mais ser cancelado" });
-      return;
-    }
-    await storage.updateOrderStatus(order.id, "cancelled");
-    if (order.paymentStatus === "approved" && order.paymentExternalId) {
-      createRefund(order.paymentExternalId).then(() => storage.updatePaymentStatus(order.id, "refunded")).catch((err) => console.error(`[Cancel] Refund failed for order ${order.id}:`, err?.message));
-    }
-    triggerOrderEmail(order.id, "cancelled").catch(() => {
-    });
-    res.json({ message: "Pedido cancelado com sucesso" });
-  });
-  app2.get("/api/grafica/account/orders", requireAuth, async (req, res) => {
-    const orders2 = await storage.getOrdersByCustomer(req.customerId);
-    res.json(orders2);
-  });
-  app2.get("/api/grafica/account/addresses", requireAuth, async (req, res) => {
-    const addresses2 = await storage.getAddressesByCustomer(req.customerId);
-    res.json(addresses2);
-  });
-  app2.post("/api/grafica/account/addresses", requireAuth, validate(createAddressSchema), async (req, res) => {
-    const address = await storage.createAddress({
-      ...req.body,
-      customerId: req.customerId
-    });
-    res.status(201).json(address);
-  });
-  app2.patch("/api/grafica/account/addresses/:id", requireAuth, validate(updateAddressSchema), async (req, res) => {
-    const addrId = req.params.id;
-    const existing = await storage.getAddress(addrId);
-    if (!existing || existing.customerId !== req.customerId) {
-      res.status(404).json({ message: "Endere\xE7o n\xE3o encontrado" });
-      return;
-    }
-    const updated = await storage.updateAddress(addrId, req.body);
-    res.json(updated);
-  });
-  app2.delete("/api/grafica/account/addresses/:id", requireAuth, async (req, res) => {
-    const addrId = req.params.id;
-    const existing = await storage.getAddress(addrId);
-    if (!existing || existing.customerId !== req.customerId) {
-      res.status(404).json({ message: "Endere\xE7o n\xE3o encontrado" });
-      return;
-    }
-    await storage.deleteAddress(addrId);
-    res.status(204).send();
-  });
-  app2.patch("/api/grafica/account/profile", requireAuth, validate(updateProfileSchema), async (req, res) => {
-    const updated = await storage.updateCustomer(req.customerId, req.body);
-    if (!updated) {
-      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
-      return;
-    }
-    res.json({ id: updated.id, name: updated.name, email: updated.email, phone: updated.phone });
-  });
-  app2.post("/api/grafica/account/change-password", requireAuth, validate(changePasswordSchema), async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-    const customer = await storage.getCustomer(req.customerId);
-    if (!customer) {
-      res.status(404).json({ message: "Cliente n\xE3o encontrado" });
-      return;
-    }
-    const valid = await verifyPassword(currentPassword, customer.passwordHash);
-    if (!valid) {
-      res.status(400).json({ message: "Senha atual incorreta" });
-      return;
-    }
-    const newHash = await hashPassword(newPassword);
-    await storage.updateCustomer(req.customerId, { passwordHash: newHash });
-    res.json({ message: "Senha alterada com sucesso" });
-  });
+  registerGraficaRoutes(app2);
   registerAdminRoutes(app2);
-  app2.post("/api/webhooks/mercadopago", async (req, res) => {
-    try {
-      const webhookSecret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
-      if (webhookSecret) {
-        const xSignature = req.headers["x-signature"];
-        const xRequestId = req.headers["x-request-id"];
-        const dataId = req.query["data.id"] || req.body?.data?.id || "";
-        if (!xSignature) {
-          console.warn("[Webhook] Missing x-signature header");
-          res.status(401).json({ message: "Assinatura ausente" });
-          return;
-        }
-        const parts = Object.fromEntries(
-          xSignature.split(",").map((p) => {
-            const [k, ...v] = p.split("=");
-            return [k.trim(), v.join("=")];
-          })
-        );
-        const ts = parts["ts"];
-        const v13 = parts["v1"];
-        if (!ts || !v13) {
-          console.warn("[Webhook] Invalid x-signature format");
-          res.status(401).json({ message: "Formato de assinatura inv\xE1lido" });
-          return;
-        }
-        const template = `id:${dataId};request-id:${xRequestId};ts:${ts};`;
-        const computed = createHmac("sha256", webhookSecret).update(template).digest("hex");
-        try {
-          const valid = timingSafeEqual(Buffer.from(computed), Buffer.from(v13));
-          if (!valid) {
-            console.warn("[Webhook] Signature mismatch");
-            res.status(401).json({ message: "Assinatura inv\xE1lida" });
-            return;
-          }
-        } catch {
-          console.warn("[Webhook] Signature comparison failed");
-          res.status(401).json({ message: "Assinatura inv\xE1lida" });
-          return;
-        }
-      } else {
-        console.warn("[Webhook] MERCADOPAGO_WEBHOOK_SECRET not set \u2014 skipping signature validation");
-      }
-      const { type, data } = req.body;
-      if (type !== "payment" || !data?.id) {
-        res.status(200).json({ received: true, processed: false });
-        return;
-      }
-      const paymentId = String(data.id);
-      console.log(`[Webhook] Payment notification received: ${paymentId}`);
-      const payment = await getPayment(paymentId);
-      console.log(`[Webhook] Payment ${paymentId}: status=${payment.status}, ref=${payment.externalReference}`);
-      if (!payment.externalReference) {
-        console.warn(`[Webhook] Payment ${paymentId} has no external_reference, skipping.`);
-        res.status(200).json({ received: true, processed: false });
-        return;
-      }
-      const orderId = payment.externalReference;
-      const order = await storage.getOrder(orderId);
-      if (!order) {
-        console.warn(`[Webhook] Order ${orderId} not found for payment ${paymentId}`);
-        res.status(200).json({ received: true, processed: false });
-        return;
-      }
-      const { orderStatus, paymentStatus } = mapPaymentStatus(payment.status);
-      const resolvedPaymentMethod = mapPaymentMethod(payment.paymentTypeId);
-      if (order.paymentStatus !== paymentStatus) {
-        await storage.updatePaymentStatus(orderId, paymentStatus, paymentId);
-        await storage.updateOrderStatus(orderId, orderStatus);
-        console.log(`[Webhook] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}, method=${resolvedPaymentMethod}`);
-        if (paymentStatus === "approved" && order.notes) {
-          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
-          if (sessionMatch) {
-            await storage.clearCart(sessionMatch[1]);
-            console.log(`[Webhook] Cart cleared for session ${sessionMatch[1]}`);
-          }
-        }
-        if (paymentStatus === "approved") {
-          autoGenerateLabel(orderId).catch(() => {
-          });
-        }
-        triggerOrderEmail(orderId, orderStatus).catch(() => {
-        });
-      }
-      res.status(200).json({ received: true, processed: true });
-    } catch (err) {
-      console.error("[Webhook] Error processing notification:", err?.message || err);
-      res.status(200).json({ received: true, error: true });
-    }
-  });
-  app2.get("/api/grafica/orders/:id/payment-status", async (req, res) => {
-    const order = await storage.getOrder(req.params.id);
-    if (!order) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    res.json({
-      orderId: order.id,
-      status: order.status,
-      paymentStatus: order.paymentStatus,
-      paymentMethod: order.paymentMethod
-    });
-  });
-  app2.post("/api/grafica/orders/:id/verify-payment", async (req, res) => {
-    const orderId = req.params.id;
-    const { paymentId } = req.body;
-    const order = await storage.getOrder(orderId);
-    if (!order) {
-      res.status(404).json({ message: "Pedido n\xE3o encontrado" });
-      return;
-    }
-    if (order.paymentStatus === "approved") {
-      res.json({
-        orderId: order.id,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        updated: false
-      });
-      return;
-    }
-    if (!paymentId) {
-      res.json({
-        orderId: order.id,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        updated: false
-      });
-      return;
-    }
-    try {
-      const payment = await getPayment(String(paymentId));
-      console.log(`[VerifyPayment] Order ${orderId}: MP payment ${paymentId} status=${payment.status}`);
-      if (payment.externalReference !== orderId) {
-        console.warn(`[VerifyPayment] Payment ${paymentId} ref=${payment.externalReference} does not match order ${orderId}`);
-        res.status(400).json({ message: "Pagamento n\xE3o corresponde ao pedido" });
-        return;
-      }
-      const { orderStatus, paymentStatus } = mapPaymentStatus(payment.status);
-      if (order.paymentStatus !== paymentStatus) {
-        await storage.updatePaymentStatus(orderId, paymentStatus, String(paymentId));
-        await storage.updateOrderStatus(orderId, orderStatus);
-        console.log(`[VerifyPayment] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}`);
-        if (paymentStatus === "approved" && order.notes) {
-          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
-          if (sessionMatch) {
-            await storage.clearCart(sessionMatch[1]);
-          }
-        }
-        if (paymentStatus === "approved") {
-          autoGenerateLabel(orderId).catch(() => {
-          });
-        }
-        triggerOrderEmail(orderId, orderStatus).catch(() => {
-        });
-      }
-      res.json({
-        orderId: order.id,
-        status: orderStatus,
-        paymentStatus,
-        updated: order.paymentStatus !== paymentStatus
-      });
-    } catch (err) {
-      console.error(`[VerifyPayment] Error verifying payment ${paymentId}:`, err?.message || err);
-      res.json({
-        orderId: order.id,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
-        updated: false,
-        error: "N\xE3o foi poss\xEDvel verificar o pagamento"
-      });
-    }
-  });
   return httpServer2;
 }
 

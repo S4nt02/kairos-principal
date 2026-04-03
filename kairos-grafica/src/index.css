@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* ── Brand Fonts: Zero Neue (titles, self-hosted) + Montserrat (body, Google Fonts) ── */
+@font-face {
+  font-family: 'Zero Neue';
+  src: url('/fonts/zero-neue/ZeroNeue-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Zero Neue';
+  src: url('/fonts/zero-neue/ZeroNeue-SemiBold.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Zero Neue';
+  src: url('/fonts/zero-neue/ZeroNeue-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Zero Neue';
+  src: url('/fonts/zero-neue/ZeroNeue-Black.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme inline {
+  --color-background: #F8F7F2;
+  --color-foreground: #202926;
+
+  --color-card: #FAFAF7;
+  --color-card-foreground: #202926;
+
+  --color-popover: #FAFAF7;
+  --color-popover-foreground: #202926;
+
+  --color-primary: #202926;
+  --color-primary-foreground: #F8F7F2;
+
+  --color-secondary: #75756E;
+  --color-secondary-foreground: #F8F7F2;
+
+  --color-muted: #F0EFEA;
+  --color-muted-foreground: #75756E;
+
+  --color-accent: #F0EFEA;
+  --color-accent-foreground: #202926;
+
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+
+  --color-border: #C6C6C6;
+  --color-input: #C6C6C6;
+  --color-ring: #202926;
+
+  --font-sans: 'Montserrat', sans-serif;
+  --font-display: 'Zero Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-background text-foreground selection:bg-foreground selection:text-background;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer utilities {
+  .will-change-transform {
+    will-change: transform;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-md border border-white/20 shadow-xl;
+  }
+
+  .clip-diagonal {
+    clip-path: polygon(0 0, 100% 0, 100% 85%, 0 100%);
+  }
+
+  /* Swiss Style — Giant editorial typography */
+  .swiss-title {
+    font-family: 'Zero Neue', sans-serif;
+    font-size: clamp(2.8rem, 8vw, 8rem);
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .swiss-title-xl {
+    font-family: 'Zero Neue', sans-serif;
+    font-size: clamp(4rem, 10vw, 10rem);
+    line-height: 0.88;
+    letter-spacing: -0.03em;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  /* Swiss generous section spacing */
+  .section-swiss {
+    padding-top: clamp(3.5rem, 10vw, 10rem);
+    padding-bottom: clamp(3.5rem, 10vw, 10rem);
+  }
+
+  /* Parallax container */
+  .parallax-container {
+    overflow: hidden;
+  }
+
+  .gsap-parallax {
+    will-change: transform;
+  }
+}
