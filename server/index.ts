@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { releaseExpiredReservations } from "./services/stock-reservation";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -105,4 +106,11 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // Cron: release expired stock reservations every 60s
+  setInterval(() => {
+    releaseExpiredReservations().catch((err) =>
+      log(`[StockReservation] Cron error: ${err?.message}`, "cron"),
+    );
+  }, 60_000);
 })();

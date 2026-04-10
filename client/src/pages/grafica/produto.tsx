@@ -12,6 +12,9 @@ import { FinishingSelector } from "@/components/grafica/finishing-selector";
 import { ColorSelector } from "@/components/grafica/color-selector";
 import { FileUploader } from "@/components/grafica/file-uploader";
 import { PriceDisplay } from "@/components/grafica/price-display";
+import { WireoSelector } from "@/components/grafica/wireo-selector";
+import { AddonSelector } from "@/components/grafica/addon-selector";
+import { DiscountBadge } from "@/components/grafica/discount-badge";
 import { CartDrawer } from "@/components/grafica/cart-drawer";
 import { Footer } from "@/components/layout";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,6 +38,8 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
   const [selectedFinishings, setSelectedFinishings] = useState<string[]>([]);
   const [selectedQuantity, setSelectedQuantity] = useState<number>(0);
   const [selectedColors, setSelectedColors] = useState<"4x0" | "4x1" | "4x4">("4x0");
+  const [selectedWireo, setSelectedWireo] = useState<string | null>(null);
+  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
   const [artFile, setArtFile] = useState<File | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
@@ -70,6 +75,18 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
     return product.availableFinishings.filter((f) => selectedFinishings.includes(f.id));
   }, [product, selectedFinishings]);
 
+  const selectedWireoObject = useMemo(() => {
+    if (!product || !selectedWireo) return null;
+    return product.availableWireoOptions.find((w) => w.id === selectedWireo) ?? null;
+  }, [product, selectedWireo]);
+
+  const selectedAddonObjects = useMemo(() => {
+    if (!product) return [];
+    return product.addonCategories
+      .flatMap((cat) => cat.items)
+      .filter((item) => selectedAddons.includes(item.id));
+  }, [product, selectedAddons]);
+
   const price = useMemo(() => {
     if (!product) return null;
     return calculatePrice({
@@ -77,8 +94,12 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
       variant: selectedVariant,
       finishings: selectedFinishingObjects,
       priceRules: product.priceRules,
+      basePrice: parseFloat(product.basePrice),
+      wireoOption: selectedWireoObject,
+      selectedAddonItems: selectedAddonObjects,
+      activeDiscount: product.activeDiscount,
     });
-  }, [product, selectedQuantity, selectedVariant, selectedFinishingObjects]);
+  }, [product, selectedQuantity, selectedVariant, selectedFinishingObjects, selectedWireoObject, selectedAddonObjects]);
 
   const handleAddToCart = useCallback(() => {
     if (!product || !price) return;
@@ -90,6 +111,14 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
       specs["Acabamento"] = selectedFinishingObjects.map((f) => f.name).join(", ");
     }
     specs["Cores"] = selectedColors;
+    if (selectedWireoObject) {
+      specs["Wire-o"] = selectedWireoObject.name;
+      specs["__wireoOptionId"] = selectedWireoObject.id;
+    }
+    if (selectedAddonObjects.length > 0) {
+      specs["Adereços"] = selectedAddonObjects.map((a) => a.name).join(", ");
+      specs["__addonItemIds"] = JSON.stringify(selectedAddonObjects.map((a) => a.id));
+    }
 
     addItem.mutate(
       {
@@ -98,6 +127,9 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
         quantity: selectedQuantity,
         unitPrice: price.unitPrice.toFixed(4),
         specifications: specs,
+        wireoOptionId: selectedWireoObject?.id ?? undefined,
+        addonItemIds: selectedAddonObjects.map((a) => a.id),
+        finishingIds: selectedFinishings,
       },
       {
         onSuccess: () => {
@@ -107,7 +139,7 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
         },
       },
     );
-  }, [product, price, selectedPaper, selectedVariant, selectedQuantity, selectedColors, selectedFinishingObjects, addItem]);
+  }, [product, price, selectedPaper, selectedVariant, selectedQuantity, selectedColors, selectedFinishingObjects, selectedWireoObject, selectedAddonObjects, addItem]);
 
   const seoTitle = product?.seoTitle || product?.name;
   const seoDescription = product?.seoDescription || product?.description || `${product?.name} — Gráfica Kairós`;
@@ -206,6 +238,17 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
               </motion.div>
 
               {/* Product image area */}
+              {/* Discount badge */}
+              {product.activeDiscount && (
+                <motion.div
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.5, ease: EASE }}
+                >
+                  <DiscountBadge discount={product.activeDiscount} />
+                </motion.div>
+              )}
+
               <motion.div
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
@@ -269,6 +312,34 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
                   />
                 )}
 
+                {product.availableWireoOptions.length > 0 && (
+                  <WireoSelector
+                    options={product.availableWireoOptions}
+                    value={selectedWireo}
+                    onChange={setSelectedWireo}
+                  />
+                )}
+
+                {product.addonCategories.length > 0 && (
+                  <AddonSelector
+                    categories={product.addonCategories}
+                    value={selectedAddons}
+                    onChange={setSelectedAddons}
+                  />
+                )}
+
+                {product.mioloType && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">Miolo</label>
+                    <div className="px-4 py-3 rounded-lg border border-border/50 bg-muted/20">
+                      <span className="text-sm text-foreground">{product.mioloType.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {product.mioloType.weightGsm}g — {product.mioloType.finish}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <FileUploader file={artFile} onFileSelect={setArtFile} />
               </motion.div>
             </div>
@@ -320,6 +391,24 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
                         <span className="font-medium font-mono">
                           {selectedVariant.widthMm}x{selectedVariant.heightMm}mm
                         </span>
+                      </div>
+                    )}
+                    {selectedWireoObject && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Wire-o</span>
+                        <span className="font-medium">{selectedWireoObject.name}</span>
+                      </div>
+                    )}
+                    {selectedAddonObjects.length > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Adereços</span>
+                        <span className="font-medium text-right ml-4">{selectedAddonObjects.map((a) => a.name).join(", ")}</span>
+                      </div>
+                    )}
+                    {price && price.discountAmount > 0 && (
+                      <div className="flex justify-between text-primary">
+                        <span>Desconto</span>
+                        <span className="font-medium">-{formatCurrency(price.discountAmount)}</span>
                       </div>
                     )}
                     {artFile && (

@@ -231,6 +231,51 @@ export type EstrategiaStep = {
   createdAt: Date;
 };
 
+export type WireoOption = {
+  id: string;
+  productId: string;
+  name: string;
+  colorHex: string | null;
+  sizeMm: number | null;
+  priceModifier: string;
+  stockQuantity: number;
+  active: boolean;
+  sortOrder: number;
+};
+
+export type AddonCategory = {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  sortOrder: number;
+  createdAt: Date;
+};
+
+export type AddonItem = {
+  id: string;
+  addonCategoryId: string;
+  name: string;
+  description: string | null;
+  priceModifier: string;
+  stockQuantity: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt: Date;
+};
+
+export type ProductDiscount = {
+  id: string;
+  productId: string;
+  name: string;
+  discountType: "percentage" | "fixed";
+  discountValue: string;
+  validFrom: Date;
+  validTo: Date;
+  active: boolean;
+  createdAt: Date;
+};
+
 export type InsertUser = Omit<User, "id">;
 export type InsertAdminUser = Omit<AdminUser, "id" | "lastLoginAt" | "createdAt">;
 export type InsertAuditLog = Omit<AuditLog, "id" | "createdAt">;

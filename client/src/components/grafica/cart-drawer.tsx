@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { X, ShoppingCart, Trash2, Plus, Minus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,7 +15,7 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
   const { cart, isLoading, updateItem, removeItem } = useCart();
   const items = cart?.items ?? [];
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <>
@@ -182,6 +183,7 @@ export function CartDrawer({ open, onClose }: CartDrawerProps) {
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

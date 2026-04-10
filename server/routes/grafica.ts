@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../storage";
 import { randomUUID, createHmac, timingSafeEqual } from "crypto";
-import type { CategoryWithCount, CategoryWithProducts, ProductWithDetails } from "../../shared/types";
+import type { CategoryWithCount, CategoryWithProducts, ProductWithDetails, AddonCategoryWithItems } from "../../shared/types";
 import {
   validate, addCartItemSchema, updateCartItemSchema,
   checkoutSchema, updateStatusSchema,
@@ -9,6 +9,9 @@ import {
   createAddressSchema, updateAddressSchema,
   updateProfileSchema, changePasswordSchema,
 } from "../middleware/validate";
+import { calculateServerPrice, isPriceMismatch } from "../services/price-engine";
+import { reserveStock, confirmReservations, releaseOrderReservations, type ReserveItem } from "../services/stock-reservation";
+import { db } from "../db";
 import { requireAuth } from "../middleware/auth";
 import { hashPassword, verifyPassword, generateToken } from "../services/auth";
 import {
@@ -85,26 +88,66 @@ export function registerGraficaRoutes(app: Express): void {
     const variants = await storage.getProductVariants(product.id);
     const priceRules = await storage.getPriceRules(product.id);
     const allPapers = await storage.getPaperTypes();
-    const allFinishings = await storage.getFinishings();
 
     const usedPaperIds = new Set(variants.map((v) => v.paperTypeId));
-    const usedFinishingIds = new Set(
-      variants.map((v) => v.finishingId).filter(Boolean),
-    );
 
     const prices = priceRules.map((r) => parseFloat(r.pricePerUnit));
     const priceRange = prices.length > 0
       ? { min: Math.min(...prices), max: Math.max(...prices) }
       : { min: parseFloat(product.basePrice), max: parseFloat(product.basePrice) };
 
+    // Personalização: finalizações do produto, wire-o, adereços, desconto ativo
+    const [
+      availableFinishings,
+      availableWireoOptions,
+      assignedAddonItems,
+      activeDiscount,
+    ] = await Promise.all([
+      storage.getProductFinishings(product.id),
+      storage.getWireoOptionsByProduct(product.id),
+      storage.getProductAddonItems(product.id),
+      storage.getActiveProductDiscount(product.id),
+    ]);
+
+    // Group assigned addon items by category
+    const addonCategoryMap = new Map<string, typeof assignedAddonItems>();
+    for (const item of assignedAddonItems) {
+      const catId = item.addonCategoryId;
+      if (!addonCategoryMap.has(catId)) addonCategoryMap.set(catId, []);
+      addonCategoryMap.get(catId)!.push(item);
+    }
+
+    const addonCategories: AddonCategoryWithItems[] = (
+      await Promise.all(
+        Array.from(addonCategoryMap.entries()).map(async ([catId, items]) => {
+          const cat = await storage.getAddonCategory(catId);
+          if (!cat) return null;
+          return {
+            ...cat,
+            items: items.filter((i) => i.active),
+            maxAllowed: items.length,
+          };
+        }),
+      )
+    ).filter((c): c is AddonCategoryWithItems => c !== null);
+
+    // Miolo paper type (fixed attribute)
+    const mioloType = product.mioloTypeId
+      ? allPapers.find((p) => p.id === product.mioloTypeId) ?? null
+      : null;
+
     const result: ProductWithDetails = {
       ...product,
       category,
       variants,
       availablePapers: allPapers.filter((p) => usedPaperIds.has(p.id)),
-      availableFinishings: allFinishings.filter((f) => usedFinishingIds.has(f.id)),
+      availableFinishings,
       priceRange,
       priceRules,
+      mioloType,
+      availableWireoOptions,
+      addonCategories,
+      activeDiscount: activeDiscount ?? null,
     };
     res.json(result);
   });
@@ -178,6 +221,29 @@ export function registerGraficaRoutes(app: Express): void {
   });
 
   app.post("/api/grafica/cart", validate(addCartItemSchema), async (req, res) => {
+    const { productId, quantity, unitPrice, wireoOptionId, addonItemIds, finishingIds } = req.body;
+
+    // PRICE_MISMATCH guard — recalculate server-side before trusting client price
+    try {
+      const serverResult = await calculateServerPrice(productId, {
+        wireoOptionId,
+        addonItemIds,
+        finishingIds,
+      }, quantity);
+
+      if (isPriceMismatch(parseFloat(unitPrice), serverResult.unitPrice)) {
+        console.warn("[Cart] PRICE_MISMATCH", {
+          productId,
+          clientUnitPrice: unitPrice,
+          serverUnitPrice: serverResult.unitPrice,
+        });
+        res.status(422).json({ error: "PRICE_MISMATCH", message: "O preço informado não confere. Atualize a página e tente novamente." });
+        return;
+      }
+    } catch {
+      // If price engine fails (e.g. product not found), continue — order will be flagged on checkout
+    }
+
     const cartItem = await storage.addCartItem(req.body);
     res.status(201).json(cartItem);
   });
@@ -387,25 +453,63 @@ export function registerGraficaRoutes(app: Express): void {
 
     const orderNotes = [notes, `__sessionId:${sessionId}`].filter(Boolean).join("\n");
 
-    const order = await storage.createOrder({
-      customerId: req.customerId!,
-      status: "pending",
-      addressId: null,
-      subtotal: subtotal.toFixed(2),
-      shippingCost: shippingCost.toFixed(2),
-      total: total.toFixed(2),
-      paymentMethod: (process.env.PAYMENT_MODE || "mercadopago") === "whatsapp" ? "whatsapp_pix" : "mercadopago",
-      paymentStatus: "pending",
-      paymentExternalId: null,
-      mpPreferenceId: null,
-      shippingTrackingCode: null,
-      shippingAddress: address || null,
-      shippingServiceId: shippingOption?.melhorEnvioId ?? null,
-      shippingLabelUrl: null,
-      couponCode: appliedCouponCode,
-      discountAmount: discountAmount.toFixed(2),
-      notes: orderNotes,
-    });
+    // Build stock reserve items from all cart items' personalização
+    const reserveItems: ReserveItem[] = [];
+    for (const item of cartItemsList) {
+      const specs = item.specifications as Record<string, string> | null ?? {};
+      if (specs["__wireoOptionId"]) {
+        reserveItems.push({ entityType: "wireo_option", entityId: specs["__wireoOptionId"], quantity: 1 });
+      }
+      if (specs["__addonItemIds"]) {
+        try {
+          const ids: string[] = JSON.parse(specs["__addonItemIds"]);
+          for (const id of ids) {
+            reserveItems.push({ entityType: "addon_item", entityId: id, quantity: 1 });
+          }
+        } catch { /* malformed — skip */ }
+      }
+    }
+
+    // Atomic: reserve stock + create order inside a single transaction
+    let order: Awaited<ReturnType<typeof storage.createOrder>>;
+    try {
+      order = await db.transaction(async (tx) => {
+        // Reserve stock (throws InsufficientStockError on failure → auto-rollback)
+        if (reserveItems.length > 0) {
+          await reserveStock(tx, sessionId, reserveItems);
+        }
+
+        const [newOrder] = await tx
+          .insert((await import("../../shared/schema")).orders)
+          .values({
+            customerId: req.customerId!,
+            status: "pending",
+            addressId: null,
+            subtotal: subtotal.toFixed(2),
+            shippingCost: shippingCost.toFixed(2),
+            total: total.toFixed(2),
+            paymentMethod: (process.env.PAYMENT_MODE || "mercadopago") === "whatsapp" ? "whatsapp_pix" : "mercadopago",
+            paymentStatus: "pending",
+            paymentExternalId: null,
+            mpPreferenceId: null,
+            shippingTrackingCode: null,
+            shippingAddress: address || null,
+            shippingServiceId: shippingOption?.melhorEnvioId ?? null,
+            shippingLabelUrl: null,
+            couponCode: appliedCouponCode,
+            discountAmount: discountAmount.toFixed(2),
+            notes: orderNotes,
+          })
+          .returning();
+        return newOrder;
+      });
+    } catch (err: any) {
+      if (err?.name === "InsufficientStockError") {
+        res.status(409).json({ error: "OUT_OF_STOCK", message: "Um dos itens selecionados está sem estoque disponível. Remova-o do carrinho e tente novamente." });
+        return;
+      }
+      throw err;
+    }
 
     console.log(`[Checkout] Order ${order.id} created: shippingAddress=${address ? 'yes' : 'no'}, shippingServiceId=${shippingOption?.melhorEnvioId ?? 'none'}`);
 
@@ -920,16 +1024,27 @@ export function registerGraficaRoutes(app: Express): void {
         await storage.updateOrderStatus(orderId, orderStatus);
         console.log(`[Webhook] Order ${orderId} updated: status=${orderStatus}, payment=${paymentStatus}`);
 
-        if (paymentStatus === "approved" && order.notes) {
-          const sessionMatch = order.notes.match(/__sessionId:(\S+)/);
-          if (sessionMatch) {
-            await storage.clearCart(sessionMatch[1]);
-            console.log(`[Webhook] Cart cleared for session ${sessionMatch[1]}`);
-          }
-        }
+        // Extract session from order notes for stock + cart management
+        const sessionMatch = order.notes?.match(/__sessionId:(\S+)/);
+        const sessionId = sessionMatch?.[1];
 
         if (paymentStatus === "approved") {
+          // Confirm stock reservations (prevents cron from releasing them)
+          if (sessionId) {
+            confirmReservations(sessionId).catch((e) =>
+              console.error(`[Webhook] Failed to confirm reservations for session ${sessionId}:`, e?.message),
+            );
+            await storage.clearCart(sessionId);
+            console.log(`[Webhook] Cart cleared for session ${sessionId}`);
+          }
           autoGenerateLabel(orderId).catch(() => {});
+        } else if (paymentStatus === "rejected" || paymentStatus === "cancelled" || orderStatus === "cancelled") {
+          // Release stock reservations immediately
+          if (sessionId) {
+            releaseOrderReservations(sessionId).catch((e) =>
+              console.error(`[Webhook] Failed to release reservations for session ${sessionId}:`, e?.message),
+            );
+          }
         }
 
         triggerOrderEmail(orderId, orderStatus).catch(() => {});

@@ -14,16 +14,24 @@ import {
   type OrderNote, type InsertOrderNote,
   type EstrategiaPlan, type InsertEstrategiaPlan,
   type EstrategiaStep, type InsertEstrategiaStep,
+  type WireoOption, type InsertWireoOption,
+  type AddonCategory, type InsertAddonCategory,
+  type AddonItem, type InsertAddonItem,
+  type ProductAddonCategory, type InsertProductAddonCategory,
+  type ProductDiscount, type InsertProductDiscount,
   users, categories, products, productVariants,
   paperTypes, finishings, priceRules,
   cartItems, orders, orderItems, customers,
   adminUsers, auditLog, storeSettings, coupons, addresses, orderNotes,
   estrategiaPlans, estrategiaSteps,
+  productFinishings,
+  wireoOptions, addonCategories, addonItems, productAddonCategories, productAddonItems,
+  productDiscounts, stockReservations,
   type InsertCategory, type InsertProduct, type InsertProductVariant,
   type InsertPaperType, type InsertFinishing, type InsertPriceRule,
 } from "../shared/schema";
 import { db } from "./db";
-import { eq, and, asc, desc, sql, count, sum, gte, lte, like, or, ilike } from "drizzle-orm";
+import { eq, and, asc, desc, sql, count, sum, gte, lte, like, or, ilike, inArray, isNull, lt, ne } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -161,6 +169,47 @@ export interface IStorage {
   createEstrategiaStep(data: InsertEstrategiaStep): Promise<EstrategiaStep>;
   updateEstrategiaStep(id: string, data: Partial<InsertEstrategiaStep>): Promise<EstrategiaStep | undefined>;
   deleteEstrategiaStep(id: string): Promise<void>;
+
+  // Product Finishings
+  getProductFinishings(productId: string): Promise<Finishing[]>;
+  assignFinishingsToProduct(productId: string, finishingIds: string[]): Promise<void>;
+  removeFinishingsFromProduct(productId: string): Promise<void>;
+  updateFinishingStock(id: string, stockQuantity: number): Promise<void>;
+
+  // Wireo Options
+  getWireoOptionsByProduct(productId: string): Promise<WireoOption[]>;
+  getWireoOption(id: string): Promise<WireoOption | undefined>;
+  createWireoOption(data: InsertWireoOption): Promise<WireoOption>;
+  updateWireoOption(id: string, data: Partial<InsertWireoOption>): Promise<WireoOption | undefined>;
+  deleteWireoOption(id: string): Promise<void>;
+  updateWireoOptionStock(id: string, stockQuantity: number): Promise<void>;
+
+  // Addon Categories & Items
+  getAllAddonCategories(): Promise<AddonCategory[]>;
+  getAddonCategory(id: string): Promise<AddonCategory | undefined>;
+  createAddonCategory(data: InsertAddonCategory): Promise<AddonCategory>;
+  updateAddonCategory(id: string, data: Partial<InsertAddonCategory>): Promise<AddonCategory | undefined>;
+  deleteAddonCategory(id: string): Promise<void>;
+  getAddonItemsByCategory(categoryId: string): Promise<AddonItem[]>;
+  getAddonItem(id: string): Promise<AddonItem | undefined>;
+  createAddonItem(data: InsertAddonItem): Promise<AddonItem>;
+  updateAddonItem(id: string, data: Partial<InsertAddonItem>): Promise<AddonItem | undefined>;
+  deleteAddonItem(id: string): Promise<void>;
+  updateAddonItemStock(id: string, stockQuantity: number): Promise<void>;
+  getProductAddonCategories(productId: string): Promise<ProductAddonCategory[]>;
+  assignAddonCategoryToProduct(data: InsertProductAddonCategory): Promise<ProductAddonCategory>;
+  removeAddonCategoryFromProduct(productId: string, addonCategoryId: string): Promise<void>;
+  bulkAssignAddonToCategory(categoryId: string, addonCategoryId: string, maxAllowed: number): Promise<number>;
+  getProductAddonItems(productId: string): Promise<AddonItem[]>;
+  assignAddonItemsToProduct(productId: string, addonItemIds: string[]): Promise<void>;
+
+  // Product Discounts
+  getProductDiscounts(productId: string): Promise<ProductDiscount[]>;
+  getActiveProductDiscount(productId: string): Promise<ProductDiscount | undefined>;
+  getAllProductDiscounts(): Promise<ProductDiscount[]>;
+  createProductDiscount(data: InsertProductDiscount): Promise<ProductDiscount>;
+  updateProductDiscount(id: string, data: Partial<InsertProductDiscount>): Promise<ProductDiscount | undefined>;
+  deleteProductDiscount(id: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -608,6 +657,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteCategory(id: string): Promise<void> {
+    const [{ total }] = await db.select({ total: count() }).from(products).where(eq(products.categoryId, id));
+    if (Number(total) > 0) {
+      throw Object.assign(new Error("Categoria possui produtos vinculados. Remova ou reatribua os produtos antes de excluir."), { statusCode: 409 });
+    }
     await db.delete(categories).where(eq(categories.id, id));
   }
 
@@ -643,6 +696,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteProduct(id: string): Promise<void> {
+    const activeOrderRows = await db
+      .select({ total: count() })
+      .from(orderItems)
+      .innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(and(eq(orderItems.productId, id), ne(orders.status, "cancelled")));
+    if (Number(activeOrderRows[0].total) > 0) {
+      throw Object.assign(new Error("Produto possui pedidos ativos vinculados. Cancele os pedidos antes de excluir."), { statusCode: 409 });
+    }
+    // Safe to delete: check above guarantees only cancelled-order items remain
+    await db.delete(orderItems).where(eq(orderItems.productId, id));
+    await db.delete(cartItems).where(eq(cartItems.productId, id));
+    await db.delete(productDiscounts).where(eq(productDiscounts.productId, id));
+    await db.delete(productFinishings).where(eq(productFinishings.productId, id));
+    await db.delete(productAddonCategories).where(eq(productAddonCategories.productId, id));
+    await db.delete(productAddonItems).where(eq(productAddonItems.productId, id));
+    await db.delete(wireoOptions).where(eq(wireoOptions.productId, id));
+    await db.delete(priceRules).where(eq(priceRules.productId, id));
+    await db.delete(productVariants).where(eq(productVariants.productId, id));
     await db.delete(products).where(eq(products.id, id));
   }
 
@@ -675,6 +746,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deletePaperType(id: string): Promise<void> {
+    const [{ total }] = await db.select({ total: count() }).from(productVariants).where(eq(productVariants.paperTypeId, id));
+    if (Number(total) > 0) {
+      throw Object.assign(new Error("Tipo de papel está em uso por variantes de produto. Remova as variantes antes de excluir."), { statusCode: 409 });
+    }
     await db.delete(paperTypes).where(eq(paperTypes.id, id));
   }
 
@@ -693,6 +768,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteFinishing(id: string): Promise<void> {
+    await db.delete(productFinishings).where(eq(productFinishings.finishingId, id));
+    await db.update(productVariants).set({ finishingId: null }).where(eq(productVariants.finishingId, id));
     await db.delete(finishings).where(eq(finishings.id, id));
   }
 
@@ -877,6 +954,196 @@ export class DatabaseStorage implements IStorage {
 
   async deleteEstrategiaStep(id: string): Promise<void> {
     await db.delete(estrategiaSteps).where(eq(estrategiaSteps.id, id));
+  }
+
+  // ── Product Finishings ──
+
+  async getProductFinishings(productId: string): Promise<Finishing[]> {
+    return db
+      .select({ id: finishings.id, name: finishings.name, type: finishings.type, priceModifier: finishings.priceModifier, multiplier: finishings.multiplier, active: finishings.active, sortOrder: finishings.sortOrder, stockQuantity: finishings.stockQuantity })
+      .from(productFinishings)
+      .innerJoin(finishings, eq(productFinishings.finishingId, finishings.id))
+      .where(and(eq(productFinishings.productId, productId), eq(finishings.active, true)))
+      .orderBy(asc(finishings.sortOrder));
+  }
+
+  async assignFinishingsToProduct(productId: string, finishingIds: string[]): Promise<void> {
+    await db.delete(productFinishings).where(eq(productFinishings.productId, productId));
+    if (finishingIds.length === 0) return;
+    const values = finishingIds.map((id) => ({ productId, finishingId: id }));
+    await db.insert(productFinishings).values(values).onConflictDoNothing();
+  }
+
+  async removeFinishingsFromProduct(productId: string): Promise<void> {
+    await db.delete(productFinishings).where(eq(productFinishings.productId, productId));
+  }
+
+  async updateFinishingStock(id: string, stockQuantity: number): Promise<void> {
+    await db.update(finishings).set({ stockQuantity }).where(eq(finishings.id, id));
+  }
+
+  // ── Wireo Options ──
+
+  async getWireoOptionsByProduct(productId: string): Promise<WireoOption[]> {
+    return db.select().from(wireoOptions).where(and(eq(wireoOptions.productId, productId), eq(wireoOptions.active, true))).orderBy(asc(wireoOptions.sortOrder));
+  }
+
+  async getWireoOption(id: string): Promise<WireoOption | undefined> {
+    const [row] = await db.select().from(wireoOptions).where(eq(wireoOptions.id, id));
+    return row;
+  }
+
+  async createWireoOption(data: InsertWireoOption): Promise<WireoOption> {
+    const [row] = await db.insert(wireoOptions).values(data).returning();
+    return row;
+  }
+
+  async updateWireoOption(id: string, data: Partial<InsertWireoOption>): Promise<WireoOption | undefined> {
+    const [row] = await db.update(wireoOptions).set(data).where(eq(wireoOptions.id, id)).returning();
+    return row;
+  }
+
+  async deleteWireoOption(id: string): Promise<void> {
+    await db.delete(wireoOptions).where(eq(wireoOptions.id, id));
+  }
+
+  async updateWireoOptionStock(id: string, stockQuantity: number): Promise<void> {
+    await db.update(wireoOptions).set({ stockQuantity }).where(eq(wireoOptions.id, id));
+  }
+
+  // ── Addon Categories & Items ──
+
+  async getAllAddonCategories(): Promise<AddonCategory[]> {
+    return db.select().from(addonCategories).orderBy(asc(addonCategories.sortOrder));
+  }
+
+  async getAddonCategory(id: string): Promise<AddonCategory | undefined> {
+    const [row] = await db.select().from(addonCategories).where(eq(addonCategories.id, id));
+    return row;
+  }
+
+  async createAddonCategory(data: InsertAddonCategory): Promise<AddonCategory> {
+    const [row] = await db.insert(addonCategories).values(data).returning();
+    return row;
+  }
+
+  async updateAddonCategory(id: string, data: Partial<InsertAddonCategory>): Promise<AddonCategory | undefined> {
+    const [row] = await db.update(addonCategories).set(data).where(eq(addonCategories.id, id)).returning();
+    return row;
+  }
+
+  async deleteAddonCategory(id: string): Promise<void> {
+    // Get all items in this category first
+    const items = await db.select({ id: addonItems.id }).from(addonItems).where(eq(addonItems.addonCategoryId, id));
+    for (const item of items) {
+      await db.delete(productAddonItems).where(eq(productAddonItems.addonItemId, item.id));
+    }
+    await db.delete(addonItems).where(eq(addonItems.addonCategoryId, id));
+    await db.delete(productAddonCategories).where(eq(productAddonCategories.addonCategoryId, id));
+    await db.delete(addonCategories).where(eq(addonCategories.id, id));
+  }
+
+  async getAddonItemsByCategory(categoryId: string): Promise<AddonItem[]> {
+    return db.select().from(addonItems).where(eq(addonItems.addonCategoryId, categoryId)).orderBy(asc(addonItems.sortOrder));
+  }
+
+  async getAddonItem(id: string): Promise<AddonItem | undefined> {
+    const [row] = await db.select().from(addonItems).where(eq(addonItems.id, id));
+    return row;
+  }
+
+  async createAddonItem(data: InsertAddonItem): Promise<AddonItem> {
+    const [row] = await db.insert(addonItems).values(data).returning();
+    return row;
+  }
+
+  async updateAddonItem(id: string, data: Partial<InsertAddonItem>): Promise<AddonItem | undefined> {
+    const [row] = await db.update(addonItems).set(data).where(eq(addonItems.id, id)).returning();
+    return row;
+  }
+
+  async deleteAddonItem(id: string): Promise<void> {
+    await db.delete(productAddonItems).where(eq(productAddonItems.addonItemId, id));
+    await db.delete(addonItems).where(eq(addonItems.id, id));
+  }
+
+  async updateAddonItemStock(id: string, stockQuantity: number): Promise<void> {
+    await db.update(addonItems).set({ stockQuantity }).where(eq(addonItems.id, id));
+  }
+
+  async getProductAddonCategories(productId: string): Promise<ProductAddonCategory[]> {
+    return db.select().from(productAddonCategories).where(eq(productAddonCategories.productId, productId));
+  }
+
+  async assignAddonCategoryToProduct(data: InsertProductAddonCategory): Promise<ProductAddonCategory> {
+    const [row] = await db.insert(productAddonCategories).values(data).onConflictDoNothing().returning();
+    return row;
+  }
+
+  async removeAddonCategoryFromProduct(productId: string, addonCategoryId: string): Promise<void> {
+    await db.delete(productAddonCategories).where(
+      and(eq(productAddonCategories.productId, productId), eq(productAddonCategories.addonCategoryId, addonCategoryId)),
+    );
+  }
+
+  async bulkAssignAddonToCategory(categoryId: string, addonCategoryId: string, maxAllowed: number): Promise<number> {
+    const prods = await db.select({ id: products.id }).from(products).where(eq(products.categoryId, categoryId));
+    if (prods.length === 0) return 0;
+    const values = prods.map((p) => ({ productId: p.id, addonCategoryId, maxAllowed }));
+    await db.insert(productAddonCategories).values(values).onConflictDoNothing();
+    return prods.length;
+  }
+
+  async getProductAddonItems(productId: string): Promise<AddonItem[]> {
+    return db
+      .select({ id: addonItems.id, addonCategoryId: addonItems.addonCategoryId, name: addonItems.name, description: addonItems.description, priceModifier: addonItems.priceModifier, stockQuantity: addonItems.stockQuantity, active: addonItems.active, sortOrder: addonItems.sortOrder, createdAt: addonItems.createdAt })
+      .from(productAddonItems)
+      .innerJoin(addonItems, eq(productAddonItems.addonItemId, addonItems.id))
+      .where(eq(productAddonItems.productId, productId))
+      .orderBy(asc(addonItems.sortOrder));
+  }
+
+  async assignAddonItemsToProduct(productId: string, addonItemIds: string[]): Promise<void> {
+    await db.delete(productAddonItems).where(eq(productAddonItems.productId, productId));
+    if (addonItemIds.length === 0) return;
+    await db.insert(productAddonItems).values(addonItemIds.map((id) => ({ productId, addonItemId: id }))).onConflictDoNothing();
+  }
+
+  // ── Product Discounts ──
+
+  async getProductDiscounts(productId: string): Promise<ProductDiscount[]> {
+    return db.select().from(productDiscounts).where(eq(productDiscounts.productId, productId)).orderBy(desc(productDiscounts.createdAt));
+  }
+
+  async getActiveProductDiscount(productId: string): Promise<ProductDiscount | undefined> {
+    const now = new Date();
+    const [row] = await db.select().from(productDiscounts).where(
+      and(
+        eq(productDiscounts.productId, productId),
+        eq(productDiscounts.active, true),
+        lte(productDiscounts.validFrom, now),
+        gte(productDiscounts.validTo, now),
+      ),
+    ).limit(1);
+    return row;
+  }
+
+  async getAllProductDiscounts(): Promise<ProductDiscount[]> {
+    return db.select().from(productDiscounts).orderBy(desc(productDiscounts.createdAt));
+  }
+
+  async createProductDiscount(data: InsertProductDiscount): Promise<ProductDiscount> {
+    const [row] = await db.insert(productDiscounts).values(data).returning();
+    return row;
+  }
+
+  async updateProductDiscount(id: string, data: Partial<InsertProductDiscount>): Promise<ProductDiscount | undefined> {
+    const [row] = await db.update(productDiscounts).set(data).where(eq(productDiscounts.id, id)).returning();
+    return row;
+  }
+
+  async deleteProductDiscount(id: string): Promise<void> {
+    await db.delete(productDiscounts).where(eq(productDiscounts.id, id));
   }
 }
 

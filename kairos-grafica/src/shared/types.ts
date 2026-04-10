@@ -1,4 +1,4 @@
-import type { Category, Product, PaperType, Finishing, ProductVariant, PriceRule, CartItem, Order, OrderItem, Address, AdminUser, Customer } from "./schema";
+import type { Category, Product, PaperType, Finishing, ProductVariant, PriceRule, CartItem, Order, OrderItem, Address, AdminUser, Customer, WireoOption, AddonCategory, AddonItem, ProductDiscount } from "./schema";
 
 export interface PriceRange {
   min: number;
@@ -9,6 +9,11 @@ export interface CategoryWithCount extends Category {
   productCount: number;
 }
 
+export interface AddonCategoryWithItems extends AddonCategory {
+  items: AddonItem[];
+  maxAllowed: number;
+}
+
 export interface ProductWithDetails extends Product {
   category: Category;
   variants: ProductVariant[];
@@ -16,6 +21,10 @@ export interface ProductWithDetails extends Product {
   availableFinishings: Finishing[];
   priceRange: PriceRange;
   priceRules: PriceRule[];
+  mioloType?: PaperType | null;
+  availableWireoOptions: WireoOption[];
+  addonCategories: AddonCategoryWithItems[];
+  activeDiscount?: ProductDiscount | null;
 }
 
 export interface CategoryWithProducts extends Category {

@@ -3,6 +3,7 @@ import { useAdminAuth } from "@/hooks/use-admin-auth";
 import {
   LayoutDashboard, ShoppingCart, Package, Users, BarChart3,
   Settings, FolderTree, FileText, Palette, Layers, Ticket, Megaphone,
+  Sparkles, Warehouse,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,8 @@ const navItems: NavItem[] = [
   { label: "Produtos", href: "/catalog/products", icon: Package, roles: ["admin"] },
   { label: "Papéis", href: "/catalog/paper-types", icon: FileText, roles: ["admin"] },
   { label: "Acabamentos", href: "/catalog/finishings", icon: Palette, roles: ["admin"] },
+  { label: "Personalizações", href: "/personalizacoes", icon: Sparkles, roles: ["admin"] },
+  { label: "Estoque", href: "/estoque", icon: Warehouse, roles: ["admin", "operador"] },
   { label: "Cupons", href: "/coupons", icon: Ticket, roles: ["admin"] },
   { label: "Estratégia", href: "/estrategia", icon: Megaphone, roles: ["admin"] },
   { label: "Clientes", href: "/customers", icon: Users, roles: ["admin", "operador", "financeiro"] },
