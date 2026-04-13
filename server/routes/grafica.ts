@@ -270,36 +270,21 @@ export function registerGraficaRoutes(app: Express): void {
 
   // ── Order Routes ──
 
-  app.post("/api/grafica/orders", async (req, res) => {
-    const order = await storage.createOrder(req.body);
-    if (req.body.items) {
-      const orderItemsToInsert = req.body.items.map((item: any) => ({
-        ...item,
-        orderId: order.id,
-      }));
-      await storage.addOrderItems(orderItemsToInsert);
-    }
-    res.status(201).json(order);
-  });
+  // NOTE: Order creation only happens via POST /api/grafica/checkout (authenticated).
+  // There is no standalone POST /api/grafica/orders endpoint.
 
-  app.get("/api/grafica/orders/:id", async (req, res) => {
+  app.get("/api/grafica/orders/:id", requireAuth, async (req, res) => {
     const order = await storage.getOrder(req.params.id);
     if (!order) {
       res.status(404).json({ message: "Pedido não encontrado" });
       return;
     }
-    const items = await storage.getOrderItems(order.id);
-    res.json({ ...order, items });
-  });
-
-  app.patch("/api/grafica/orders/:id/status", validate(updateStatusSchema), async (req, res) => {
-    const { status } = req.body;
-    const updated = await storage.updateOrderStatus(req.params.id as string, status);
-    if (!updated) {
-      res.status(404).json({ message: "Pedido não encontrado" });
+    if (order.customerId !== req.customerId) {
+      res.status(403).json({ message: "Acesso negado" });
       return;
     }
-    res.json(updated);
+    const items = await storage.getOrderItems(order.id);
+    res.json({ ...order, items });
   });
 
   // ── Shipping ──
@@ -724,10 +709,15 @@ export function registerGraficaRoutes(app: Express): void {
 
   // ── Tracking ──
 
-  app.get("/api/grafica/orders/:id/tracking", async (req, res) => {
+  app.get("/api/grafica/orders/:id/tracking", requireAuth, async (req, res) => {
     const order = await storage.getOrder(req.params.id as string);
     if (!order) {
       res.status(404).json({ message: "Pedido não encontrado" });
+      return;
+    }
+
+    if (order.customerId !== req.customerId) {
+      res.status(403).json({ message: "Acesso negado" });
       return;
     }
 
@@ -846,10 +836,14 @@ export function registerGraficaRoutes(app: Express): void {
 
   // ── Payment Status Check ──
 
-  app.get("/api/grafica/orders/:id/payment-status", async (req, res) => {
+  app.get("/api/grafica/orders/:id/payment-status", requireAuth, async (req, res) => {
     const order = await storage.getOrder(req.params.id as string);
     if (!order) {
       res.status(404).json({ message: "Pedido não encontrado" });
+      return;
+    }
+    if (order.customerId !== req.customerId) {
+      res.status(403).json({ message: "Acesso negado" });
       return;
     }
     res.json({
@@ -862,13 +856,18 @@ export function registerGraficaRoutes(app: Express): void {
 
   // ── Verify Payment (active check when user returns from MP) ──
 
-  app.post("/api/grafica/orders/:id/verify-payment", async (req, res) => {
+  app.post("/api/grafica/orders/:id/verify-payment", requireAuth, async (req, res) => {
     const orderId = req.params.id as string;
     const { paymentId } = req.body;
 
     const order = await storage.getOrder(orderId);
     if (!order) {
       res.status(404).json({ message: "Pedido não encontrado" });
+      return;
+    }
+
+    if (order.customerId !== req.customerId) {
+      res.status(403).json({ message: "Acesso negado" });
       return;
     }
 
@@ -987,8 +986,12 @@ export function registerGraficaRoutes(app: Express): void {
           res.status(401).json({ message: "Assinatura inválida" });
           return;
         }
+      } else if (process.env.NODE_ENV === "production") {
+        console.error("[Webhook] MERCADOPAGO_WEBHOOK_SECRET not set in production — rejecting request");
+        res.status(500).json({ message: "Webhook não configurado" });
+        return;
       } else {
-        console.warn("[Webhook] MERCADOPAGO_WEBHOOK_SECRET not set — skipping signature validation");
+        console.warn("[Webhook] MERCADOPAGO_WEBHOOK_SECRET not set — skipping signature validation (dev only)");
       }
 
       const { type, data } = req.body;

@@ -31,11 +31,7 @@ interface TrackingEvent {
 
 function TrackingTimeline({ orderId }: { orderId: string }) {
   const { data, isLoading } = useQuery<{ trackingCode: string; events: TrackingEvent[] }>({
-    queryKey: ["/api/grafica/orders", orderId, "tracking"],
-    queryFn: async () => {
-      const res = await fetch(`/api/grafica/orders/${orderId}/tracking`);
-      return res.json();
-    },
+    queryKey: [`/api/grafica/orders/${orderId}/tracking`],
     staleTime: 60_000,
   });
 
@@ -164,9 +160,13 @@ export default function GraficaPedido({ id }: GraficaPedidoProps) {
 
     if (paymentId && !verified) {
       setVerified(true);
+      const token = localStorage.getItem("kairos_auth_token");
       fetch(`/api/grafica/orders/${id}/verify-payment`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ paymentId }),
       })
         .then((r) => r.json())
