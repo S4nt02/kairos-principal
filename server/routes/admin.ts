@@ -77,6 +77,7 @@ const createProductSchema = z.object({
   active: z.boolean().default(true),
   seoTitle: z.string().optional(),
   seoDescription: z.string().optional(),
+  stockQuantity: z.number().int().min(0).default(0),
 });
 
 const updateProductSchema = createProductSchema.partial();
@@ -595,6 +596,11 @@ export function registerAdminRoutes(app: Express) {
     }
     await audit(req.adminUserId!, "update", "product", str(req.params.id));
     res.json(product);
+  });
+
+  app.patch("/api/admin/products/:id/stock", requireRole("admin", "operador"), validate(stockUpdateSchema), async (req, res) => {
+    await storage.updateProductStock(str(req.params.id), req.body.stockQuantity);
+    res.json({ ok: true });
   });
 
   app.delete("/api/admin/products/:id", requireRole("admin"), async (req, res) => {
@@ -1245,16 +1251,32 @@ export function registerAdminRoutes(app: Express) {
   // ══════════════════════════════════════════
 
   app.get("/api/admin/stock", requireRole("admin", "operador"), async (_req, res) => {
-    const [allFinishings, addonCats] = await Promise.all([
+    const [allFinishings, addonCats, productsResult, allWireo] = await Promise.all([
       storage.getAllFinishingsAdmin(),
       storage.getAllAddonCategories(),
+      storage.getAllProductsAdmin({ page: 1, pageSize: 1000 }),
+      storage.getAllWireoOptions(),
     ]);
+
+    const productItems = productsResult.data.map((p) => ({
+      id: p.id,
+      name: p.name,
+      entityType: "product" as const,
+      stockQuantity: p.stockQuantity ?? 0,
+    }));
 
     const finishingItems = allFinishings.map((f) => ({
       id: f.id,
       name: f.name,
       entityType: "finishing" as const,
       stockQuantity: f.stockQuantity,
+    }));
+
+    const wireoItems = allWireo.map((w) => ({
+      id: w.id,
+      name: w.name,
+      entityType: "wireo_option" as const,
+      stockQuantity: w.stockQuantity,
     }));
 
     const addonItemsAll = (await Promise.all(
@@ -1266,6 +1288,6 @@ export function registerAdminRoutes(app: Express) {
       stockQuantity: i.stockQuantity,
     }));
 
-    res.json([...finishingItems, ...addonItemsAll]);
+    res.json([...productItems, ...finishingItems, ...wireoItems, ...addonItemsAll]);
   });
 }

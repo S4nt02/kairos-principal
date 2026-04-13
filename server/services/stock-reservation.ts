@@ -10,13 +10,13 @@
 
 import { db } from "../db";
 import {
-  wireoOptions, addonItems, stockReservations,
+  wireoOptions, addonItems, products, stockReservations,
 } from "../../shared/schema";
 import { eq, and, lt, isNull, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { log } from "../index";
 
-export type ReservableEntityType = "wireo_option" | "addon_item";
+export type ReservableEntityType = "product" | "wireo_option" | "addon_item";
 
 export interface ReserveItem {
   entityType: ReservableEntityType;
@@ -36,6 +36,7 @@ export class InsufficientStockError extends Error {
 
 function tableFor(entityType: ReservableEntityType) {
   switch (entityType) {
+    case "product":      return products;
     case "wireo_option": return wireoOptions;
     case "addon_item":   return addonItems;
   }
@@ -53,6 +54,8 @@ export async function reserveStock(
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // +10 minutes
 
+  log(`[StockReservation] Reservando ${items.length} item(s) para sessão ${cartSessionId}: ${JSON.stringify(items)}`, "stock");
+
   for (const item of items) {
     const table = tableFor(item.entityType);
 
@@ -64,11 +67,15 @@ export async function reserveStock(
       .for("update");
 
     if (rows.length === 0) {
+      log(`[StockReservation] ERRO: ${item.entityType} ${item.entityId} não encontrado`, "stock");
       throw new InsufficientStockError(item.entityType, item.entityId);
     }
 
     const current = rows[0].stockQuantity;
+    log(`[StockReservation] ${item.entityType} ${item.entityId}: estoque=${current}, pedido=${item.quantity}`, "stock");
+
     if (current < item.quantity) {
+      log(`[StockReservation] INSUFICIENTE: ${item.entityType} ${item.entityId}`, "stock");
       throw new InsufficientStockError(item.entityType, item.entityId);
     }
 
@@ -77,6 +84,8 @@ export async function reserveStock(
       .update(table as any)
       .set({ stockQuantity: sql`${(table as any).stockQuantity} - ${item.quantity}` })
       .where(eq((table as any).id, item.entityId));
+
+    log(`[StockReservation] OK: ${item.entityType} ${item.entityId} decrementado de ${current} para ${current - item.quantity}`, "stock");
 
     // Record reservation
     await tx.insert(stockReservations).values({

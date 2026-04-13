@@ -26,13 +26,17 @@ export function FinishingSelector({ finishings, selected, onChange }: FinishingS
         {finishings.map((fin) => {
           const isSelected = selected.includes(fin.id);
           const price = parseFloat(fin.priceModifier);
+          const outOfStock = fin.stockQuantity === 0;
           return (
             <button
               key={fin.id}
-              onClick={() => toggle(fin.id)}
+              onClick={() => !outOfStock && toggle(fin.id)}
+              disabled={outOfStock}
               className={cn(
                 "flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all duration-200",
-                isSelected
+                outOfStock
+                  ? "border-border bg-muted/30 opacity-60 cursor-not-allowed"
+                  : isSelected
                   ? "border-primary bg-primary/10"
                   : "border-border bg-background hover:border-primary/50",
               )}
@@ -40,9 +44,9 @@ export function FinishingSelector({ finishings, selected, onChange }: FinishingS
               <div className="flex items-center gap-3">
                 <div className={cn(
                   "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-                  isSelected ? "border-primary bg-primary" : "border-muted-foreground/30",
+                  isSelected && !outOfStock ? "border-primary bg-primary" : "border-muted-foreground/30",
                 )}>
-                  {isSelected && (
+                  {isSelected && !outOfStock && (
                     <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
@@ -50,16 +54,18 @@ export function FinishingSelector({ finishings, selected, onChange }: FinishingS
                 </div>
                 <span className={cn(
                   "text-sm font-medium",
-                  isSelected ? "text-primary" : "text-foreground",
+                  outOfStock ? "text-muted-foreground" : isSelected ? "text-primary" : "text-foreground",
                 )}>
                   {fin.name}
                 </span>
               </div>
-              {price > 0 && (
+              {outOfStock ? (
+                <span className="text-xs font-mono text-destructive/70">Esgotado</span>
+              ) : price > 0 ? (
                 <span className="text-xs font-mono text-muted-foreground">
                   +{formatCurrency(price)}/un.
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}

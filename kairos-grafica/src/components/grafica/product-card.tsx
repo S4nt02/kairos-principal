@@ -30,6 +30,13 @@ export function ProductCard({ product, index }: ProductCardProps) {
       <div className="group relative overflow-hidden rounded-xl border border-border/50 bg-card hover:border-primary/30 transition-all duration-500">
         {/* Image area */}
         <div className="aspect-[4/3] bg-muted/30 relative overflow-hidden">
+          {product.stockQuantity === 0 && (
+            <div className="absolute top-3 left-3 z-10">
+              <span className="text-xs font-mono uppercase tracking-widest px-2.5 py-1 rounded-full bg-destructive/90 text-destructive-foreground">
+                Esgotado
+              </span>
+            </div>
+          )}
           {product.imageUrl ? (
             <img
               src={product.imageUrl}
@@ -70,11 +77,17 @@ export function ProductCard({ product, index }: ProductCardProps) {
               </p>
             </div>
 
-            <Link href={`/grafica/produto/${product.slug}`}>
-              <button className="px-4 py-2 text-sm font-medium bg-foreground text-background rounded-full hover:bg-primary transition-colors duration-300">
-                Configurar
-              </button>
-            </Link>
+            {product.stockQuantity === 0 ? (
+              <span className="px-4 py-2 text-sm font-medium bg-muted text-muted-foreground rounded-full cursor-not-allowed">
+                Esgotado
+              </span>
+            ) : (
+              <Link href={`/grafica/produto/${product.slug}`}>
+                <button className="px-4 py-2 text-sm font-medium bg-foreground text-background rounded-full hover:bg-primary transition-colors duration-300">
+                  Configurar
+                </button>
+              </Link>
+            )}
           </div>
         </div>
       </div>

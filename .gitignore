@@ -1,5 +1,6 @@
 node_modules
 dist
+uploads/
 .DS_Store
 .env
 .replit
@@ -13,4 +14,4 @@ api/index.js
 .agents
 .claude
 docs
-api
+

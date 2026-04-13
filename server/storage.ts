@@ -118,6 +118,7 @@ export interface IStorage {
   getProductById(id: string): Promise<Product | undefined>;
   createProduct(data: InsertProduct): Promise<Product>;
   updateProduct(id: string, data: Partial<InsertProduct>): Promise<Product | undefined>;
+  updateProductStock(id: string, stockQuantity: number): Promise<void>;
   deleteProduct(id: string): Promise<void>;
   createProductVariant(data: InsertProductVariant): Promise<ProductVariant>;
   updateProductVariant(id: string, data: Partial<InsertProductVariant>): Promise<ProductVariant | undefined>;
@@ -178,6 +179,7 @@ export interface IStorage {
 
   // Wireo Options
   getWireoOptionsByProduct(productId: string): Promise<WireoOption[]>;
+  getAllWireoOptions(): Promise<WireoOption[]>;
   getWireoOption(id: string): Promise<WireoOption | undefined>;
   createWireoOption(data: InsertWireoOption): Promise<WireoOption>;
   updateWireoOption(id: string, data: Partial<InsertWireoOption>): Promise<WireoOption | undefined>;
@@ -695,6 +697,10 @@ export class DatabaseStorage implements IStorage {
     return product;
   }
 
+  async updateProductStock(id: string, stockQuantity: number): Promise<void> {
+    await db.update(products).set({ stockQuantity }).where(eq(products.id, id));
+  }
+
   async deleteProduct(id: string): Promise<void> {
     const activeOrderRows = await db
       .select({ total: count() })
@@ -1011,6 +1017,10 @@ export class DatabaseStorage implements IStorage {
     await db.update(wireoOptions).set({ stockQuantity }).where(eq(wireoOptions.id, id));
   }
 
+  async getAllWireoOptions(): Promise<WireoOption[]> {
+    return db.select().from(wireoOptions).orderBy(asc(wireoOptions.sortOrder));
+  }
+
   // ── Addon Categories & Items ──
 
   async getAllAddonCategories(): Promise<AddonCategory[]> {
@@ -1096,7 +1106,7 @@ export class DatabaseStorage implements IStorage {
 
   async getProductAddonItems(productId: string): Promise<AddonItem[]> {
     return db
-      .select({ id: addonItems.id, addonCategoryId: addonItems.addonCategoryId, name: addonItems.name, description: addonItems.description, priceModifier: addonItems.priceModifier, stockQuantity: addonItems.stockQuantity, active: addonItems.active, sortOrder: addonItems.sortOrder, createdAt: addonItems.createdAt })
+      .select({ id: addonItems.id, addonCategoryId: addonItems.addonCategoryId, name: addonItems.name, description: addonItems.description, imageUrl: addonItems.imageUrl, priceModifier: addonItems.priceModifier, stockQuantity: addonItems.stockQuantity, active: addonItems.active, sortOrder: addonItems.sortOrder, createdAt: addonItems.createdAt })
       .from(productAddonItems)
       .innerJoin(addonItems, eq(productAddonItems.addonItemId, addonItems.id))
       .where(eq(productAddonItems.productId, productId))

@@ -13,19 +13,21 @@ import { toast } from "sonner";
 interface StockItem {
   id: string;
   name: string;
-  entityType: "finishing" | "wireo_option" | "addon_item";
+  entityType: "product" | "finishing" | "wireo_option" | "addon_item";
   stockQuantity: number;
 }
 
 const typeLabel: Record<string, string> = {
+  product: "Produto",
   finishing: "Acabamento",
   wireo_option: "Wire-o",
   addon_item: "Adereço",
 };
 
 const typeVariant = (type: string): "default" | "secondary" | "outline" => {
-  if (type === "finishing") return "default";
-  if (type === "wireo_option") return "secondary";
+  if (type === "product") return "default";
+  if (type === "finishing") return "secondary";
+  if (type === "wireo_option") return "outline";
   return "outline";
 };
 
@@ -43,7 +45,9 @@ export default function Estoque() {
     mutationFn: async () => {
       if (!editItem) return;
       const path =
-        editItem.entityType === "finishing"
+        editItem.entityType === "product"
+          ? `/api/admin/products/${editItem.id}/stock`
+          : editItem.entityType === "finishing"
           ? `/api/admin/finishings/${editItem.id}/stock`
           : editItem.entityType === "wireo_option"
           ? `/api/admin/wireo-options/${editItem.id}/stock`

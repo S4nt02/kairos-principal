@@ -5,6 +5,8 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { releaseExpiredReservations } from "./services/stock-reservation";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -71,6 +73,17 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Ensure stock_quantity columns exist (idempotent — safe to re-run)
+  try {
+    await db.execute(sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_quantity integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE finishings ADD COLUMN IF NOT EXISTS stock_quantity integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE wireo_options ADD COLUMN IF NOT EXISTS stock_quantity integer NOT NULL DEFAULT 0`);
+    await db.execute(sql`ALTER TABLE addon_items ADD COLUMN IF NOT EXISTS stock_quantity integer NOT NULL DEFAULT 0`);
+    log("Stock columns verified", "startup");
+  } catch (e: any) {
+    log(`Stock column check failed: ${e.message}`, "startup");
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

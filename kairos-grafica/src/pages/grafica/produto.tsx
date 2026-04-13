@@ -224,9 +224,16 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ duration: 0.7, ease: EASE }}
               >
-                <span className="text-primary font-mono text-xs uppercase tracking-[0.3em] block mb-3">
-                  Configurar Pedido
-                </span>
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-primary font-mono text-xs uppercase tracking-[0.3em]">
+                    Configurar Pedido
+                  </span>
+                  {product.stockQuantity === 0 && (
+                    <span className="text-xs font-mono uppercase tracking-widest px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20">
+                      Esgotado
+                    </span>
+                  )}
+                </div>
                 <h1 className="text-3xl md:text-4xl font-display font-bold tracking-tight">
                   {product.name}
                 </h1>
@@ -399,30 +406,36 @@ export default function GraficaProduto({ slug }: GraficaProdutoProps) {
                 </div>
 
                 {/* Add to cart button */}
-                <button
-                  onClick={handleAddToCart}
-                  disabled={addItem.isPending || addedToCart}
-                  className={cn(
-                    "w-full py-3.5 rounded-full font-medium text-sm flex items-center justify-center gap-2 transition-all duration-300",
-                    addedToCart
-                      ? "bg-green-500 text-white"
-                      : "bg-foreground text-background hover:bg-primary",
-                  )}
-                >
-                  {addedToCart ? (
-                    <>
-                      <Check className="w-4 h-4" />
-                      Adicionado!
-                    </>
-                  ) : addItem.isPending ? (
-                    "Adicionando..."
-                  ) : (
-                    <>
-                      <ShoppingCart className="w-4 h-4" />
-                      Adicionar ao Carrinho
-                    </>
-                  )}
-                </button>
+                {product.stockQuantity === 0 ? (
+                  <div className="w-full py-3.5 rounded-full font-medium text-sm flex items-center justify-center gap-2 bg-muted text-muted-foreground cursor-not-allowed border border-border">
+                    Produto Esgotado
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleAddToCart}
+                    disabled={addItem.isPending || addedToCart}
+                    className={cn(
+                      "w-full py-3.5 rounded-full font-medium text-sm flex items-center justify-center gap-2 transition-all duration-300",
+                      addedToCart
+                        ? "bg-green-500 text-white"
+                        : "bg-foreground text-background hover:bg-primary",
+                    )}
+                  >
+                    {addedToCart ? (
+                      <>
+                        <Check className="w-4 h-4" />
+                        Adicionado!
+                      </>
+                    ) : addItem.isPending ? (
+                      "Adicionando..."
+                    ) : (
+                      <>
+                        <ShoppingCart className="w-4 h-4" />
+                        Adicionar ao Carrinho
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {itemCount > 0 && (
                   <button

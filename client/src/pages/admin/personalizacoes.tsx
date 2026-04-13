@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Package } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Upload, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/grafica/price-engine";
 import type { AddonCategory, AddonItem } from "@shared/schema";
@@ -23,7 +23,8 @@ function AddonCategoriesTab() {
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
   const [catForm, setCatForm] = useState({ name: "", description: "", active: true, sortOrder: 0 });
-  const [itemForm, setItemForm] = useState({ addonCategoryId: "", name: "", description: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
+  const [itemForm, setItemForm] = useState({ addonCategoryId: "", name: "", description: "", imageUrl: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
+  const [uploadingItemImage, setUploadingItemImage] = useState(false);
 
   const { data: categories = [] } = useQuery<(AddonCategory & { items: AddonItem[] })[]>({
     queryKey: ["/api/admin/addon-categories"],
@@ -64,11 +65,34 @@ function AddonCategoriesTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/admin/addon-categories"] });
       setItemOpen(false); setEditItemId(null);
-      setItemForm({ addonCategoryId: "", name: "", description: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
+      setItemForm({ addonCategoryId: "", name: "", description: "", imageUrl: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
       toast.success(editItemId ? "Item atualizado" : "Item criado");
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  async function handleItemImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingItemImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = localStorage.getItem("kairos_admin_token");
+      const res = await fetch("/api/admin/upload-image", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error((await res.json()).message || "Erro no upload");
+      const { url } = await res.json();
+      setItemForm((f) => ({ ...f, imageUrl: url }));
+    } catch (err: any) {
+      console.error(err.message);
+    } finally {
+      setUploadingItemImage(false);
+    }
+  }
 
   const delItem = useMutation({
     mutationFn: (id: string) => adminApiRequest("DELETE", `/api/admin/addon-items/${id}`),
@@ -105,7 +129,7 @@ function AddonCategoriesTab() {
               </Button>
               <Button variant="outline" size="sm" onClick={() => {
                 setSelectedCatId(cat.id);
-                setItemForm({ addonCategoryId: cat.id, name: "", description: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
+                setItemForm({ addonCategoryId: cat.id, name: "", description: "", imageUrl: "", priceModifier: "0", stockQuantity: 0, active: true, sortOrder: 0 });
                 setItemOpen(true);
               }}>
                 <Plus className="w-3.5 h-3.5 mr-1" /> Item
@@ -115,6 +139,7 @@ function AddonCategoriesTab() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12"></TableHead>
                 <TableHead>Item</TableHead>
                 <TableHead>Adicional</TableHead>
                 <TableHead>Estoque</TableHead>
@@ -124,6 +149,15 @@ function AddonCategoriesTab() {
             <TableBody>
               {cat.items.map((item) => (
                 <TableRow key={item.id}>
+                  <TableCell>
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt={item.name} className="w-9 h-9 rounded object-cover border border-border" />
+                    ) : (
+                      <div className="w-9 h-9 rounded bg-muted flex items-center justify-center border border-border">
+                        <Package className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <span className="font-medium">{item.name}</span>
                     {item.description && <p className="text-xs text-muted-foreground">{item.description}</p>}
@@ -138,7 +172,7 @@ function AddonCategoriesTab() {
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
                         setEditItemId(item.id);
-                        setItemForm({ addonCategoryId: item.addonCategoryId, name: item.name, description: item.description ?? "", priceModifier: item.priceModifier, stockQuantity: item.stockQuantity, active: item.active, sortOrder: item.sortOrder });
+                        setItemForm({ addonCategoryId: item.addonCategoryId, name: item.name, description: item.description ?? "", imageUrl: item.imageUrl ?? "", priceModifier: item.priceModifier, stockQuantity: item.stockQuantity, active: item.active, sortOrder: item.sortOrder });
                         setItemOpen(true);
                       }}>
                         <Pencil className="w-3.5 h-3.5" />
@@ -196,6 +230,28 @@ function AddonCategoriesTab() {
         <DialogContent>
           <DialogHeader><DialogTitle>{editItemId ? "Editar Item" : "Novo Item de Adereço"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Imagem</Label>
+              <div className="flex items-center gap-3">
+                {itemForm.imageUrl ? (
+                  <img src={itemForm.imageUrl} alt="Preview" className="h-14 w-14 object-cover rounded border" />
+                ) : (
+                  <div className="h-14 w-14 rounded border bg-muted flex items-center justify-center">
+                    <Package className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                )}
+                <label className="cursor-pointer">
+                  <input type="file" accept="image/*" className="hidden" onChange={handleItemImageUpload} disabled={uploadingItemImage} />
+                  <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-accent transition-colors">
+                    {uploadingItemImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {uploadingItemImage ? "Enviando..." : "Upload"}
+                  </span>
+                </label>
+                {itemForm.imageUrl && (
+                  <button className="text-xs text-destructive hover:underline" onClick={() => setItemForm((f) => ({ ...f, imageUrl: "" }))}>Remover</button>
+                )}
+              </div>
+            </div>
             <div className="space-y-1.5">
               <Label>Nome</Label>
               <Input value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} placeholder="Ex: Cordão azul" />

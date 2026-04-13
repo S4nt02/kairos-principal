@@ -22,6 +22,8 @@ const CustomersList = lazy(() => import("./customers/index"));
 const CustomerDetail = lazy(() => import("./customers/[id]"));
 const Reports = lazy(() => import("./reports/index"));
 const SettingsPage = lazy(() => import("./settings/index"));
+const FakePayment = lazy(() => import("./dev/fake-payment"));
+const ShippingSandbox = lazy(() => import("./dev/shipping-sandbox"));
 
 function AdminLoading() {
   return (
@@ -83,6 +85,8 @@ export default function AdminLayout() {
               </Route>
               <Route path="/reports" component={Reports} />
               <Route path="/settings" component={SettingsPage} />
+              <Route path="/dev/fake-payment" component={FakePayment} />
+              <Route path="/dev/shipping-sandbox" component={ShippingSandbox} />
             </Switch>
           </Suspense>
         </main>

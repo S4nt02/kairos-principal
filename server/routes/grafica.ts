@@ -453,9 +453,12 @@ export function registerGraficaRoutes(app: Express): void {
 
     const orderNotes = [notes, `__sessionId:${sessionId}`].filter(Boolean).join("\n");
 
-    // Build stock reserve items from all cart items' personalização
+    // Build stock reserve items from all cart items
     const reserveItems: ReserveItem[] = [];
     for (const item of cartItemsList) {
+      // Reserve the product itself
+      reserveItems.push({ entityType: "product", entityId: item.productId, quantity: item.quantity });
+
       const specs = item.specifications as Record<string, string> | null ?? {};
       if (specs["__wireoOptionId"]) {
         reserveItems.push({ entityType: "wireo_option", entityId: specs["__wireoOptionId"], quantity: 1 });

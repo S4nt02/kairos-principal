@@ -127,6 +127,7 @@ export const createAddonItemSchema = z.object({
   addonCategoryId: z.string().uuid(),
   name: z.string().min(1),
   description: z.string().optional().nullable(),
+  imageUrl: z.string().optional().nullable(),
   priceModifier: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
   stockQuantity: z.number().int().nonnegative().default(0),
   active: z.boolean().default(true),

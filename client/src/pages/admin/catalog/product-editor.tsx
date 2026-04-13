@@ -33,6 +33,7 @@ export default function ProductEditor({ id }: { id?: string }) {
     name: "", slug: "", categoryId: "", description: "", basePrice: "0.00",
     minQuantity: 1, imageUrl: "", active: true, seoTitle: "", seoDescription: "",
     quantitySteps: "" as string, // comma-separated, empty = free quantity mode
+    stockQuantity: 0,
   });
 
   const { data: categories } = useQuery<Category[]>({
@@ -66,6 +67,7 @@ export default function ProductEditor({ id }: { id?: string }) {
         quantitySteps: Array.isArray(product.quantitySteps) && product.quantitySteps.length > 0
           ? product.quantitySteps.join(", ")
           : "",
+        stockQuantity: product.stockQuantity ?? 0,
       });
     }
   }, [product]);
@@ -353,6 +355,11 @@ export default function ProductEditor({ id }: { id?: string }) {
                     <Label>Quantidade mínima</Label>
                     <Input type="number" min={1} value={form.minQuantity} onChange={(e) => setForm({ ...form, minQuantity: parseInt(e.target.value) || 1 })} />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Estoque</Label>
+                  <Input type="number" min={0} value={form.stockQuantity} onChange={(e) => setForm({ ...form, stockQuantity: parseInt(e.target.value) || 0 })} />
+                  <p className="text-xs text-muted-foreground">Quantidade em estoque. Coloque 0 para exibir como esgotado.</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Passos de Quantidade</Label>
@@ -703,6 +710,11 @@ export default function ProductEditor({ id }: { id?: string }) {
                               onChange={() => toggleAddonItem(item.id)}
                               className="h-4 w-4 accent-primary"
                             />
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl} alt={item.name} className="w-8 h-8 rounded object-cover border border-border flex-shrink-0" />
+                            ) : (
+                              <div className="w-8 h-8 rounded bg-muted border border-border flex-shrink-0" />
+                            )}
                             <div className="flex-1 min-w-0">
                               <span className="text-sm font-medium">{item.name}</span>
                             </div>

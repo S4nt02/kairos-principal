@@ -90,6 +90,7 @@ export const products = pgTable("products", {
   seoTitle: text("seo_title"),
   seoDescription: text("seo_description"),
   mioloTypeId: varchar("miolo_type_id"), // FK to paper_types — set after paperTypes declaration
+  stockQuantity: integer("stock_quantity").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -365,6 +366,7 @@ export const addonItems = pgTable("addon_items", {
   addonCategoryId: varchar("addon_category_id").notNull().references(() => addonCategories.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
+  imageUrl: text("image_url"),
   priceModifier: numeric("price_modifier", { precision: 10, scale: 2 }).notNull().default("0"),
   stockQuantity: integer("stock_quantity").notNull().default(0),
   active: boolean("active").notNull().default(true),

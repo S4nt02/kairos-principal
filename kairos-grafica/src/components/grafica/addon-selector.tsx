@@ -52,13 +52,17 @@ export function AddonSelector({ categories, value, onChange }: AddonSelectorProp
               {cat.items.map((item) => {
                 const isSelected = value.includes(item.id);
                 const price = parseFloat(item.priceModifier);
+                const outOfStock = item.stockQuantity === 0;
                 return (
                   <button
                     key={item.id}
-                    onClick={() => toggle(item.id, cat.maxAllowed, categoryItemIds)}
+                    onClick={() => !outOfStock && toggle(item.id, cat.maxAllowed, categoryItemIds)}
+                    disabled={outOfStock}
                     className={cn(
                       "flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all duration-200",
-                      isSelected
+                      outOfStock
+                        ? "border-border bg-muted/30 opacity-60 cursor-not-allowed"
+                        : isSelected
                         ? "border-primary bg-primary/10"
                         : "border-border bg-background hover:border-primary/50",
                     )}
@@ -66,18 +70,25 @@ export function AddonSelector({ categories, value, onChange }: AddonSelectorProp
                     <div className="flex items-center gap-3">
                       <div className={cn(
                         "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0",
-                        isSelected ? "border-primary bg-primary" : "border-muted-foreground/30",
+                        isSelected && !outOfStock ? "border-primary bg-primary" : "border-muted-foreground/30",
                       )}>
-                        {isSelected && (
+                        {isSelected && !outOfStock && (
                           <svg className="w-3 h-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
                         )}
                       </div>
+                      {item.imageUrl && (
+                        <img
+                          src={item.imageUrl}
+                          alt={item.name}
+                          className="w-8 h-8 rounded object-cover border border-border/50 flex-shrink-0"
+                        />
+                      )}
                       <div>
                         <span className={cn(
                           "text-sm font-medium block",
-                          isSelected ? "text-primary" : "text-foreground",
+                          outOfStock ? "text-muted-foreground" : isSelected ? "text-primary" : "text-foreground",
                         )}>
                           {item.name}
                         </span>
@@ -86,11 +97,13 @@ export function AddonSelector({ categories, value, onChange }: AddonSelectorProp
                         )}
                       </div>
                     </div>
-                    {price > 0 && (
+                    {outOfStock ? (
+                      <span className="text-xs font-mono text-destructive/70 whitespace-nowrap ml-2">Esgotado</span>
+                    ) : price > 0 ? (
                       <span className="text-xs font-mono text-muted-foreground whitespace-nowrap ml-2">
                         +{formatCurrency(price)}/un.
                       </span>
-                    )}
+                    ) : null}
                   </button>
                 );
               })}

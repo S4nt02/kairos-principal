@@ -24,13 +24,17 @@ export function WireoSelector({ options, value, onChange }: WireoSelectorProps) 
         {options.map((opt) => {
           const isSelected = value === opt.id;
           const price = parseFloat(opt.priceModifier);
+          const outOfStock = opt.stockQuantity === 0;
           return (
             <button
               key={opt.id}
-              onClick={() => toggle(opt.id)}
+              onClick={() => !outOfStock && toggle(opt.id)}
+              disabled={outOfStock}
               className={cn(
                 "flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all duration-200",
-                isSelected
+                outOfStock
+                  ? "border-border bg-muted/30 opacity-60 cursor-not-allowed"
+                  : isSelected
                   ? "border-primary bg-primary/10"
                   : "border-border bg-background hover:border-primary/50",
               )}
@@ -38,9 +42,9 @@ export function WireoSelector({ options, value, onChange }: WireoSelectorProps) 
               <div className="flex items-center gap-3">
                 <div className={cn(
                   "w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors",
-                  isSelected ? "border-primary bg-primary" : "border-muted-foreground/30",
+                  isSelected && !outOfStock ? "border-primary bg-primary" : "border-muted-foreground/30",
                 )}>
-                  {isSelected && <div className="w-2 h-2 rounded-full bg-primary-foreground" />}
+                  {isSelected && !outOfStock && <div className="w-2 h-2 rounded-full bg-primary-foreground" />}
                 </div>
                 <div className="flex items-center gap-2">
                   {opt.colorHex && (
@@ -52,7 +56,7 @@ export function WireoSelector({ options, value, onChange }: WireoSelectorProps) 
                   <div>
                     <span className={cn(
                       "text-sm font-medium block",
-                      isSelected ? "text-primary" : "text-foreground",
+                      outOfStock ? "text-muted-foreground" : isSelected ? "text-primary" : "text-foreground",
                     )}>
                       {opt.name}
                     </span>
@@ -62,11 +66,13 @@ export function WireoSelector({ options, value, onChange }: WireoSelectorProps) 
                   </div>
                 </div>
               </div>
-              {price > 0 && (
+              {outOfStock ? (
+                <span className="text-xs font-mono text-destructive/70 whitespace-nowrap ml-2">Esgotado</span>
+              ) : price > 0 ? (
                 <span className="text-xs font-mono text-muted-foreground whitespace-nowrap ml-2">
                   +{formatCurrency(price)}/un.
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}

@@ -62,6 +62,7 @@ export type Product = {
   active: boolean;
   seoTitle: string | null;
   seoDescription: string | null;
+  stockQuantity: number;
   createdAt: Date;
 };
 
@@ -83,6 +84,7 @@ export type Finishing = {
   multiplier: string;
   active: boolean;
   sortOrder: number;
+  stockQuantity: number;
 };
 
 export type ProductVariant = {
@@ -257,6 +259,7 @@ export type AddonItem = {
   addonCategoryId: string;
   name: string;
   description: string | null;
+  imageUrl: string | null;
   priceModifier: string;
   stockQuantity: number;
   active: boolean;
