@@ -25,6 +25,9 @@ export const addCartItemSchema = z.object({
   quantity: z.number().int().positive(),
   unitPrice: z.string().regex(/^\d+(\.\d{1,4})?$/),
   specifications: z.record(z.string()).optional(),
+  wireoOptionId: z.string().optional().nullable(),
+  addonItemIds: z.array(z.string().min(1)).max(20).optional(),
+  finishingIds: z.array(z.string().min(1)).optional(),
 });
 
 export const updateCartItemSchema = z.object({
@@ -94,4 +97,72 @@ export const updateProfileSchema = z.object({
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "Senha atual é obrigatória"),
   newPassword: z.string().min(6, "Nova senha deve ter pelo menos 6 caracteres"),
+});
+
+// ── Admin: Personalização ──
+
+export const createWireoOptionSchema = z.object({
+  productId: z.string().uuid(),
+  name: z.string().min(1),
+  colorHex: z.string().optional().nullable(),
+  sizeMm: z.number().int().positive().optional().nullable(),
+  priceModifier: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
+  stockQuantity: z.number().int().nonnegative().default(0),
+  active: z.boolean().default(true),
+  sortOrder: z.number().int().nonnegative().default(0),
+});
+
+export const updateWireoOptionSchema = createWireoOptionSchema.partial();
+
+export const createAddonCategorySchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional().nullable(),
+  active: z.boolean().default(true),
+  sortOrder: z.number().int().nonnegative().default(0),
+});
+
+export const updateAddonCategorySchema = createAddonCategorySchema.partial();
+
+export const createAddonItemSchema = z.object({
+  addonCategoryId: z.string().uuid(),
+  name: z.string().min(1),
+  description: z.string().optional().nullable(),
+  imageUrl: z.string().optional().nullable(),
+  priceModifier: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
+  stockQuantity: z.number().int().nonnegative().default(0),
+  active: z.boolean().default(true),
+  sortOrder: z.number().int().nonnegative().default(0),
+});
+
+export const updateAddonItemSchema = createAddonItemSchema.partial();
+
+const productDiscountBase = z.object({
+  productId: z.string().uuid(),
+  name: z.string().min(1),
+  discountType: z.enum(["percentage", "fixed"]),
+  discountValue: z.string().regex(/^\d+(\.\d{1,2})?$/),
+  validFrom: z.coerce.date(),
+  validTo: z.coerce.date(),
+  active: z.boolean().default(true),
+});
+
+export const createProductDiscountSchema = productDiscountBase.refine(
+  (d) => d.validTo > d.validFrom,
+  { message: "validTo deve ser posterior a validFrom", path: ["validTo"] },
+);
+
+export const updateProductDiscountSchema = productDiscountBase.partial();
+
+export const bulkAssignAddonSchema = z.object({
+  categoryId: z.string().uuid(),
+  addonCategoryId: z.string().uuid(),
+  maxAllowed: z.number().int().positive().default(1),
+});
+
+export const stockUpdateSchema = z.object({
+  stockQuantity: z.number().int().nonnegative(),
+});
+
+export const assignFinishingsToProductSchema = z.object({
+  finishingIds: z.array(z.string().min(1)).max(50),
 });

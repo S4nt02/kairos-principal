@@ -1,5 +1,6 @@
 node_modules
 dist
+uploads/
 .DS_Store
 .env
 .replit
@@ -8,4 +9,9 @@ vite.config.ts.*
 *.tar.gz
 client/public/videoplayback.mp4
 api/index.mjs
+api/index.js
 .vercel
+.agents
+.claude
+docs
+

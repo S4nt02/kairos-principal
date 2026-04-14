@@ -24,7 +24,13 @@ export async function adminApiRequest(
 
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status}: ${text}`);
+    try {
+      const json = JSON.parse(text);
+      throw new Error(json.message || text);
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new Error(text);
+      throw e;
+    }
   }
 
   return res;
@@ -49,7 +55,13 @@ export function getAdminQueryFn<T>(): QueryFunction<T> {
 
     if (!res.ok) {
       const text = await res.text().catch(() => res.statusText);
-      throw new Error(`${res.status}: ${text}`);
+      try {
+        const json = JSON.parse(text);
+        throw new Error(json.message || text);
+      } catch (e) {
+        if (e instanceof SyntaxError) throw new Error(text);
+        throw e;
+      }
     }
 
     return res.json();

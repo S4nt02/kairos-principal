@@ -13,10 +13,10 @@ import { toast } from "sonner";
 import type { Finishing } from "../../../../../shared/schema";
 
 interface FinishingForm {
-  name: string; type: string; priceModifier: string; active: boolean; sortOrder: number;
+  name: string; type: string; priceModifier: string; multiplier: string; active: boolean; sortOrder: number;
 }
 
-const defaultForm: FinishingForm = { name: "", type: "laminacao", priceModifier: "0", active: true, sortOrder: 0 };
+const defaultForm: FinishingForm = { name: "", type: "laminacao", priceModifier: "0", multiplier: "1.0", active: true, sortOrder: 0 };
 
 const FINISHING_TYPES = [
   { value: "laminacao", label: "Laminação" },
@@ -63,7 +63,7 @@ export default function Finishings() {
 
   const openEdit = (f: Finishing) => {
     setEditId(f.id);
-    setForm({ name: f.name, type: f.type, priceModifier: f.priceModifier, active: f.active, sortOrder: f.sortOrder });
+    setForm({ name: f.name, type: f.type, priceModifier: f.priceModifier, multiplier: f.multiplier, active: f.active, sortOrder: f.sortOrder });
     setCustomType(!FINISHING_TYPES.some((t) => t.value === f.type));
     setOpen(true);
   };
@@ -97,7 +97,10 @@ export default function Finishings() {
                   </Select>
                 )}
               </div>
-              <div className="space-y-2"><Label>Custo extra por unidade (R$)</Label><Input value={form.priceModifier} onChange={(e) => setForm({ ...form, priceModifier: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label>Custo extra/un (R$)</Label><Input value={form.priceModifier} onChange={(e) => setForm({ ...form, priceModifier: e.target.value })} placeholder="0.00" /></div>
+                <div className="space-y-2"><Label>Multiplicador</Label><Input value={form.multiplier} onChange={(e) => setForm({ ...form, multiplier: e.target.value })} placeholder="1.0" /></div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Ordem</Label><Input type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} /></div>
                 <div className="flex items-center gap-2 pt-6"><Switch checked={form.active} onCheckedChange={(v) => setForm({ ...form, active: v })} /><Label>Ativo</Label></div>

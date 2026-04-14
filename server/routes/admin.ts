@@ -1,7 +1,15 @@
 import type { Express } from "express";
 import { storage } from "../storage";
 import { requireAdmin, requireRole } from "../middleware/admin-auth";
-import { validate } from "../middleware/validate";
+import {
+  validate,
+  createWireoOptionSchema, updateWireoOptionSchema,
+  createAddonCategorySchema, updateAddonCategorySchema,
+  createAddonItemSchema, updateAddonItemSchema,
+  createProductDiscountSchema, updateProductDiscountSchema,
+  bulkAssignAddonSchema,
+  stockUpdateSchema, assignFinishingsToProductSchema,
+} from "../middleware/validate";
 import { hashPassword, verifyPassword, generateAdminToken } from "../services/auth";
 import {
   calculateShipping,
@@ -64,17 +72,18 @@ const createProductSchema = z.object({
   description: z.string().optional(),
   basePrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
   minQuantity: z.number().int().positive().default(100),
-  quantitySteps: z.array(z.number()).optional(),
+  quantitySteps: z.array(z.number()).nullable().optional(),
   imageUrl: z.string().optional(),
   active: z.boolean().default(true),
   seoTitle: z.string().optional(),
   seoDescription: z.string().optional(),
+  stockQuantity: z.number().int().min(0).default(0),
 });
 
 const updateProductSchema = createProductSchema.partial();
 
 const createVariantSchema = z.object({
-  productId: z.string().min(1),
+  productId: z.string().min(1).optional(),
   paperTypeId: z.string().min(1),
   finishingId: z.string().optional().nullable(),
   widthMm: z.number().int().positive(),
@@ -110,7 +119,7 @@ const createFinishingSchema = z.object({
 const updateFinishingSchema = createFinishingSchema.partial();
 
 const createPriceRuleSchema = z.object({
-  productId: z.string().min(1),
+  productId: z.string().min(1).optional(),
   minQty: z.number().int().positive(),
   maxQty: z.number().int().positive(),
   pricePerUnit: z.string().regex(/^\d+(\.\d{1,4})?$/),
@@ -589,6 +598,11 @@ export function registerAdminRoutes(app: Express) {
     res.json(product);
   });
 
+  app.patch("/api/admin/products/:id/stock", requireRole("admin", "operador"), validate(stockUpdateSchema), async (req, res) => {
+    await storage.updateProductStock(str(req.params.id), req.body.stockQuantity);
+    res.json({ ok: true });
+  });
+
   app.delete("/api/admin/products/:id", requireRole("admin"), async (req, res) => {
     await storage.deleteProduct(str(req.params.id));
     await audit(req.adminUserId!, "delete", "product", str(req.params.id));
@@ -1048,5 +1062,232 @@ export function registerAdminRoutes(app: Express) {
 
     const result = await storage.getAuditLogs({ page, pageSize, adminUserId, entityType });
     res.json({ ...result, page, pageSize, totalPages: Math.ceil(result.total / pageSize) });
+  });
+
+  // ══════════════════════════════════════════
+  // PRODUCT FINISHINGS (admin only)
+  // ══════════════════════════════════════════
+
+  app.get("/api/admin/products/:productId/finishings", requireRole("admin"), async (req, res) => {
+    res.json(await storage.getProductFinishings(str(req.params.productId)));
+  });
+
+  app.put("/api/admin/products/:productId/finishings", requireRole("admin"), validate(assignFinishingsToProductSchema), async (req, res) => {
+    await storage.assignFinishingsToProduct(str(req.params.productId), req.body.finishingIds);
+    await audit(req.adminUserId!, "update", "product_finishings", str(req.params.productId), req.body);
+    res.json({ ok: true });
+  });
+
+  app.patch("/api/admin/finishings/:id/stock", requireRole("admin"), validate(stockUpdateSchema), async (req, res) => {
+    await storage.updateFinishingStock(str(req.params.id), req.body.stockQuantity);
+    res.json({ ok: true });
+  });
+
+  // ══════════════════════════════════════════
+  // WIRE-O OPTIONS (admin only)
+  // ══════════════════════════════════════════
+
+  app.get("/api/admin/wireo-options", requireRole("admin"), async (req, res) => {
+    const productId = str(req.query.productId as string);
+    if (!productId) { res.status(400).json({ message: "productId é obrigatório" }); return; }
+    res.json(await storage.getWireoOptionsByProduct(productId));
+  });
+
+  app.post("/api/admin/wireo-options", requireRole("admin"), validate(createWireoOptionSchema), async (req, res) => {
+    const item = await storage.createWireoOption(req.body);
+    await audit(req.adminUserId!, "create", "wireo_option", item.id, req.body);
+    res.status(201).json(item);
+  });
+
+  app.put("/api/admin/wireo-options/:id", requireRole("admin"), validate(updateWireoOptionSchema), async (req, res) => {
+    const item = await storage.updateWireoOption(str(req.params.id), req.body);
+    if (!item) { res.status(404).json({ message: "Não encontrado" }); return; }
+    await audit(req.adminUserId!, "update", "wireo_option", item.id, req.body);
+    res.json(item);
+  });
+
+  app.delete("/api/admin/wireo-options/:id", requireRole("admin"), async (req, res) => {
+    await storage.deleteWireoOption(str(req.params.id));
+    await audit(req.adminUserId!, "delete", "wireo_option", str(req.params.id));
+    res.status(204).send();
+  });
+
+  app.patch("/api/admin/wireo-options/:id/stock", requireRole("admin"), validate(stockUpdateSchema), async (req, res) => {
+    await storage.updateWireoOptionStock(str(req.params.id), req.body.stockQuantity);
+    res.json({ ok: true });
+  });
+
+  // ══════════════════════════════════════════
+  // ADDON CATEGORIES & ITEMS (admin only)
+  // ══════════════════════════════════════════
+
+  app.get("/api/admin/addon-categories", requireRole("admin"), async (_req, res) => {
+    const cats = await storage.getAllAddonCategories();
+    const withItems = await Promise.all(cats.map(async (cat) => ({
+      ...cat,
+      items: await storage.getAddonItemsByCategory(cat.id),
+    })));
+    res.json(withItems);
+  });
+
+  app.post("/api/admin/addon-categories", requireRole("admin"), validate(createAddonCategorySchema), async (req, res) => {
+    const cat = await storage.createAddonCategory(req.body);
+    await audit(req.adminUserId!, "create", "addon_category", cat.id, req.body);
+    res.status(201).json(cat);
+  });
+
+  app.put("/api/admin/addon-categories/:id", requireRole("admin"), validate(updateAddonCategorySchema), async (req, res) => {
+    const cat = await storage.updateAddonCategory(str(req.params.id), req.body);
+    if (!cat) { res.status(404).json({ message: "Não encontrado" }); return; }
+    await audit(req.adminUserId!, "update", "addon_category", cat.id, req.body);
+    res.json(cat);
+  });
+
+  app.delete("/api/admin/addon-categories/:id", requireRole("admin"), async (req, res) => {
+    await storage.deleteAddonCategory(str(req.params.id));
+    await audit(req.adminUserId!, "delete", "addon_category", str(req.params.id));
+    res.status(204).send();
+  });
+
+  app.post("/api/admin/addon-items", requireRole("admin"), validate(createAddonItemSchema), async (req, res) => {
+    const item = await storage.createAddonItem(req.body);
+    await audit(req.adminUserId!, "create", "addon_item", item.id, req.body);
+    res.status(201).json(item);
+  });
+
+  app.put("/api/admin/addon-items/:id", requireRole("admin"), validate(updateAddonItemSchema), async (req, res) => {
+    const item = await storage.updateAddonItem(str(req.params.id), req.body);
+    if (!item) { res.status(404).json({ message: "Não encontrado" }); return; }
+    await audit(req.adminUserId!, "update", "addon_item", item.id, req.body);
+    res.json(item);
+  });
+
+  app.delete("/api/admin/addon-items/:id", requireRole("admin"), async (req, res) => {
+    await storage.deleteAddonItem(str(req.params.id));
+    await audit(req.adminUserId!, "delete", "addon_item", str(req.params.id));
+    res.status(204).send();
+  });
+
+  app.patch("/api/admin/addon-items/:id/stock", requireRole("admin"), validate(stockUpdateSchema), async (req, res) => {
+    await storage.updateAddonItemStock(str(req.params.id), req.body.stockQuantity);
+    res.json({ ok: true });
+  });
+
+  app.get("/api/admin/products/:productId/addon-categories", requireRole("admin"), async (req, res) => {
+    res.json(await storage.getProductAddonCategories(str(req.params.productId)));
+  });
+
+  app.get("/api/admin/products/:productId/addon-items", requireRole("admin"), async (req, res) => {
+    res.json(await storage.getProductAddonItems(str(req.params.productId)));
+  });
+
+  app.put("/api/admin/products/:productId/addon-items", requireRole("admin"), async (req, res) => {
+    const { addonItemIds } = req.body;
+    if (!Array.isArray(addonItemIds)) { res.status(400).json({ message: "addonItemIds deve ser um array" }); return; }
+    await storage.assignAddonItemsToProduct(str(req.params.productId), addonItemIds);
+    await audit(req.adminUserId!, "update", "product_addon_items", str(req.params.productId), req.body);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/admin/products/:productId/addon-categories", requireRole("admin"), async (req, res) => {
+    const { addonCategoryId, maxAllowed = 1 } = req.body;
+    if (!addonCategoryId) { res.status(400).json({ message: "addonCategoryId é obrigatório" }); return; }
+    const link = await storage.assignAddonCategoryToProduct({
+      productId: str(req.params.productId),
+      addonCategoryId,
+      maxAllowed: Number(maxAllowed),
+    });
+    await audit(req.adminUserId!, "update", "product_addon_categories", str(req.params.productId), req.body);
+    res.status(201).json(link);
+  });
+
+  app.delete("/api/admin/products/:productId/addon-categories/:addonCategoryId", requireRole("admin"), async (req, res) => {
+    await storage.removeAddonCategoryFromProduct(str(req.params.productId), str(req.params.addonCategoryId));
+    await audit(req.adminUserId!, "delete", "product_addon_categories", str(req.params.productId));
+    res.status(204).send();
+  });
+
+  app.post("/api/admin/bulk-assign/addon-categories", requireRole("admin"), validate(bulkAssignAddonSchema), async (req, res) => {
+    const { categoryId, addonCategoryId, maxAllowed } = req.body;
+    const affected = await storage.bulkAssignAddonToCategory(categoryId, addonCategoryId, maxAllowed);
+    await audit(req.adminUserId!, "bulk_assign", "addon_categories", categoryId, req.body);
+    res.json({ affectedProducts: affected });
+  });
+
+  // ══════════════════════════════════════════
+  // PRODUCT DISCOUNTS (admin only)
+  // ══════════════════════════════════════════
+
+  app.get("/api/admin/product-discounts", requireRole("admin"), async (req, res) => {
+    const productId = str(req.query.productId as string);
+    if (productId) {
+      res.json(await storage.getProductDiscounts(productId));
+    } else {
+      res.json(await storage.getAllProductDiscounts());
+    }
+  });
+
+  app.post("/api/admin/product-discounts", requireRole("admin"), validate(createProductDiscountSchema), async (req, res) => {
+    const discount = await storage.createProductDiscount(req.body);
+    await audit(req.adminUserId!, "create", "product_discount", discount.id, req.body);
+    res.status(201).json(discount);
+  });
+
+  app.put("/api/admin/product-discounts/:id", requireRole("admin"), validate(updateProductDiscountSchema), async (req, res) => {
+    const discount = await storage.updateProductDiscount(str(req.params.id), req.body);
+    if (!discount) { res.status(404).json({ message: "Não encontrado" }); return; }
+    await audit(req.adminUserId!, "update", "product_discount", discount.id, req.body);
+    res.json(discount);
+  });
+
+  app.delete("/api/admin/product-discounts/:id", requireRole("admin"), async (req, res) => {
+    await storage.deleteProductDiscount(str(req.params.id));
+    await audit(req.adminUserId!, "delete", "product_discount", str(req.params.id));
+    res.status(204).send();
+  });
+
+  // ══════════════════════════════════════════
+  // STOCK OVERVIEW (admin + operador)
+  // ══════════════════════════════════════════
+
+  app.get("/api/admin/stock", requireRole("admin", "operador"), async (_req, res) => {
+    const [allFinishings, addonCats, productsResult, allWireo] = await Promise.all([
+      storage.getAllFinishingsAdmin(),
+      storage.getAllAddonCategories(),
+      storage.getAllProductsAdmin({ page: 1, pageSize: 1000 }),
+      storage.getAllWireoOptions(),
+    ]);
+
+    const productItems = productsResult.data.map((p) => ({
+      id: p.id,
+      name: p.name,
+      entityType: "product" as const,
+      stockQuantity: p.stockQuantity ?? 0,
+    }));
+
+    const finishingItems = allFinishings.map((f) => ({
+      id: f.id,
+      name: f.name,
+      entityType: "finishing" as const,
+      stockQuantity: f.stockQuantity,
+    }));
+
+    const wireoItems = allWireo.map((w) => ({
+      id: w.id,
+      name: w.name,
+      entityType: "wireo_option" as const,
+      stockQuantity: w.stockQuantity,
+    }));
+
+    const addonItemsAll = (await Promise.all(
+      addonCats.map((cat) => storage.getAddonItemsByCategory(cat.id)),
+    )).flat().map((i) => ({
+      id: i.id,
+      name: i.name,
+      entityType: "addon_item" as const,
+      stockQuantity: i.stockQuantity,
+    }));
+
+    res.json([...productItems, ...finishingItems, ...wireoItems, ...addonItemsAll]);
   });
 }

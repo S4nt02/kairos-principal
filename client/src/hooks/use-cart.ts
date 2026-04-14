@@ -29,6 +29,9 @@ export function useCart() {
       quantity: number;
       unitPrice: string;
       specifications?: Record<string, string>;
+      wireoOptionId?: string;
+      addonItemIds?: string[];
+      finishingIds?: string[];
     }) => {
       const res = await apiRequest("POST", "/api/grafica/cart", {
         sessionId,

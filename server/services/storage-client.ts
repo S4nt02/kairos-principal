@@ -1,20 +1,20 @@
+import { put, del } from "@vercel/blob";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+// ── Supabase (art files — signed URLs) ──────────────────────────
 
 let supabase: SupabaseClient | null = null;
 
-function getClient(): SupabaseClient | null {
+function getSupabaseClient(): SupabaseClient | null {
   if (supabase) return supabase;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY;
-  if (!url || !key) {
-    console.warn("[Storage] SUPABASE_URL or SUPABASE_SERVICE_KEY not configured");
-    return null;
-  }
+  if (!url || !key) return null;
   supabase = createClient(url, key);
   return supabase;
 }
 
-const BUCKET = "art-files";
+const ART_BUCKET = "art-files";
 
 export async function uploadArtFile({
   buffer,
@@ -29,70 +29,66 @@ export async function uploadArtFile({
   orderId: string;
   orderItemId: string;
 }): Promise<string> {
-  const client = getClient();
+  const client = getSupabaseClient();
   if (!client) throw new Error("Supabase Storage não configurado");
 
   const timestamp = Date.now();
   const safeName = originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `orders/${orderId}/${orderItemId}/${timestamp}-${safeName}`;
 
-  const { error } = await client.storage.from(BUCKET).upload(path, buffer, {
+  const { error } = await client.storage.from(ART_BUCKET).upload(path, buffer, {
     contentType: mimetype,
     upsert: false,
   });
 
   if (error) throw new Error(`Upload falhou: ${error.message}`);
 
-  const { data } = client.storage.from(BUCKET).getPublicUrl(path);
+  const { data } = client.storage.from(ART_BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
 
-const PRODUCT_BUCKET = "product-images";
+export async function getSignedArtUrl(filePath: string): Promise<string> {
+  const client = getSupabaseClient();
+  if (!client) throw new Error("Supabase Storage não configurado");
+
+  const { data, error } = await client.storage
+    .from(ART_BUCKET)
+    .createSignedUrl(filePath, 3600);
+
+  if (error || !data?.signedUrl) throw new Error(`Signed URL falhou: ${error?.message}`);
+  return data.signedUrl;
+}
+
+// ── Vercel Blob (product/addon images) ──────────────────────────
 
 export async function uploadProductImage(
   buffer: Buffer,
   filename: string,
   mimetype: string,
 ): Promise<string> {
-  const client = getClient();
-  if (!client) throw new Error("Supabase Storage não configurado");
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN não configurado no .env");
 
   const timestamp = Date.now();
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${timestamp}-${safeName}`;
+  const pathname = `product-images/${timestamp}-${safeName}`;
 
-  const { error } = await client.storage.from(PRODUCT_BUCKET).upload(path, buffer, {
+  const blob = await put(pathname, buffer, {
+    access: "public",
     contentType: mimetype,
-    upsert: false,
+    token,
   });
 
-  if (error) throw new Error(`Upload falhou: ${error.message}`);
-
-  const { data } = client.storage.from(PRODUCT_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  return blob.url;
 }
 
 export async function deleteProductImage(url: string): Promise<void> {
-  const client = getClient();
-  if (!client) return;
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return;
 
-  // Extract path from full URL — the path is after /object/public/product-images/
-  const marker = `/object/public/${PRODUCT_BUCKET}/`;
-  const idx = url.indexOf(marker);
-  if (idx === -1) return;
-
-  const path = url.substring(idx + marker.length);
-  await client.storage.from(PRODUCT_BUCKET).remove([path]);
-}
-
-export async function getSignedArtUrl(filePath: string): Promise<string> {
-  const client = getClient();
-  if (!client) throw new Error("Supabase Storage não configurado");
-
-  const { data, error } = await client.storage
-    .from(BUCKET)
-    .createSignedUrl(filePath, 3600); // 1 hour
-
-  if (error || !data?.signedUrl) throw new Error(`Signed URL falhou: ${error?.message}`);
-  return data.signedUrl;
+  try {
+    await del(url, { token });
+  } catch {
+    // ignore deletion errors
+  }
 }

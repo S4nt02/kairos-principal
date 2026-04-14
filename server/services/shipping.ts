@@ -17,13 +17,56 @@ import type { CartItem, Order, OrderItem } from "../../shared/schema";
 
 // ── Config ──
 
-const MELHOR_ENVIO_TOKEN = process.env.MELHOR_ENVIO_TOKEN || "";
+// In dev: prefer MELHOR_ENVIO_SANDBOX_TOKEN; fallback to MELHOR_ENVIO_TOKEN
+// In prod: always use MELHOR_ENVIO_TOKEN (sandbox token is ignored)
+const IS_PROD = process.env.NODE_ENV === "production";
+const SANDBOX_TOKEN = process.env.MELHOR_ENVIO_SANDBOX_TOKEN || "";
+const PROD_TOKEN = process.env.MELHOR_ENVIO_TOKEN || "";
+const MELHOR_ENVIO_TOKEN = IS_PROD ? PROD_TOKEN : (SANDBOX_TOKEN || PROD_TOKEN);
+const IS_SANDBOX = !IS_PROD && !!SANDBOX_TOKEN;
+
 const WAREHOUSE_CEP = process.env.WAREHOUSE_CEP || "01001000";
-// Default to sandbox unless MELHOR_ENVIO_SANDBOX is explicitly "false"
-const IS_SANDBOX = process.env.MELHOR_ENVIO_SANDBOX !== "false";
 const BASE_URL = IS_SANDBOX
   ? "https://sandbox.melhorenvio.com.br"
-  : "https://api.melhorenvio.com.br";
+  : "https://melhorenvio.com.br";
+
+export function getMelhorEnvioStatus() {
+  return {
+    mode: IS_SANDBOX ? "sandbox" : IS_PROD ? "production" : "mock",
+    hasToken: !!MELHOR_ENVIO_TOKEN,
+    baseUrl: BASE_URL,
+    sandboxToken: SANDBOX_TOKEN ? `${SANDBOX_TOKEN.substring(0, 8)}...` : null,
+    prodToken: PROD_TOKEN ? `${PROD_TOKEN.substring(0, 8)}...` : null,
+  };
+}
+
+// ── OAuth2 Token Refresh ──
+
+/**
+ * Refreshes the Melhor Envio OAuth2 access token using a refresh token.
+ * Only used in sandbox mode for dev testing.
+ */
+export async function refreshMelhorEnvioToken(refreshToken: string): Promise<{ access_token: string; refresh_token: string; expires_in: number } | null> {
+  const clientId = process.env.MELHOR_ENVIO_CLIENT_ID || "";
+  const clientSecret = process.env.MELHOR_ENVIO_CLIENT_SECRET || "";
+  if (!clientId || !clientSecret) return null;
+
+  try {
+    const response = await fetch(`${BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": "Kairos Grafica (contato@kairos.com.br)",
+      },
+      body: new URLSearchParams({ grant_type: "refresh_token", client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken }).toString(),
+    });
+    if (!response.ok) return null;
+    return await response.json() as { access_token: string; refresh_token: string; expires_in: number };
+  } catch {
+    return null;
+  }
+}
 
 // ── Types ──
 
@@ -46,6 +89,8 @@ interface CalculateShippingInput {
   destinationCep: string;
   items: CartItem[];
   insuredValue?: number;
+  overrideToken?: string;
+  overrideBaseUrl?: string;
 }
 
 interface MelhorEnvioQuote {
@@ -150,14 +195,15 @@ export async function calculatePackage(
 export async function calculateShipping(
   input: CalculateShippingInput,
 ): Promise<ShippingQuoteResult[]> {
-  if (!MELHOR_ENVIO_TOKEN) {
-    console.log("[Shipping] No MELHOR_ENVIO_TOKEN set, returning mock quotes");
+  const activeToken = input.overrideToken || MELHOR_ENVIO_TOKEN;
+  const activeUrl = input.overrideBaseUrl || BASE_URL;
+
+  if (!activeToken) {
+    console.log("[Shipping] No token set, returning mock quotes");
     return MOCK_QUOTES;
   }
 
-  console.log(`[Shipping] Using ${IS_SANDBOX ? "SANDBOX" : "PRODUCTION"} API: ${BASE_URL}`);
-  console.log(`[Shipping] Token present: ${MELHOR_ENVIO_TOKEN.length} chars, starts with: ${MELHOR_ENVIO_TOKEN.substring(0, 8)}...`);
-
+  console.log(`[Shipping] Using ${activeUrl} (token: ${activeToken.substring(0, 8)}...)`);
   const pkg = await calculatePackage(input.items);
 
   // Calculate insured value from cart items if not provided
@@ -187,12 +233,12 @@ export async function calculateShipping(
   try {
     console.log("[Shipping] Calling Melhor Envio API:", JSON.stringify(body));
 
-    const response = await fetch(`${BASE_URL}/api/v2/me/shipment/calculate`, {
+    const response = await fetch(`${activeUrl}/api/v2/me/shipment/calculate`, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: `Bearer ${MELHOR_ENVIO_TOKEN}`,
+        Authorization: `Bearer ${activeToken}`,
         "User-Agent": "Kairos Grafica (contato@kairos.com.br)",
       },
       body: JSON.stringify(body),
@@ -282,7 +328,8 @@ export async function addToMelhorEnvioCart(params: {
   products: { name: string; quantity: number; unitary_value: number }[];
 }): Promise<{ cartItemId: string }> {
   if (!MELHOR_ENVIO_TOKEN) {
-    throw new Error("MELHOR_ENVIO_TOKEN is required for label generation");
+    console.log("[Shipping][DEV] No token — returning fake cart item ID");
+    return { cartItemId: `fake_cart_${Date.now()}` };
   }
 
   const body = {
@@ -350,7 +397,8 @@ export async function addToMelhorEnvioCart(params: {
  */
 export async function checkoutShipment(cartItemIds: string[]): Promise<void> {
   if (!MELHOR_ENVIO_TOKEN) {
-    throw new Error("MELHOR_ENVIO_TOKEN is required for label generation");
+    console.log("[Shipping][DEV] No token — skipping shipment checkout");
+    return;
   }
 
   const response = await fetch(`${BASE_URL}/api/v2/me/shipment/checkout`, {
@@ -375,7 +423,8 @@ export async function checkoutShipment(cartItemIds: string[]): Promise<void> {
  */
 export async function generateLabel(cartItemIds: string[]): Promise<void> {
   if (!MELHOR_ENVIO_TOKEN) {
-    throw new Error("MELHOR_ENVIO_TOKEN is required for label generation");
+    console.log("[Shipping][DEV] No token — skipping label generation");
+    return;
   }
 
   const response = await fetch(`${BASE_URL}/api/v2/me/shipment/generate`, {
@@ -402,7 +451,8 @@ export async function getLabelUrl(
   cartItemIds: string[],
 ): Promise<{ url: string }> {
   if (!MELHOR_ENVIO_TOKEN) {
-    throw new Error("MELHOR_ENVIO_TOKEN is required for label generation");
+    console.log("[Shipping][DEV] No token — returning fake label URL");
+    return { url: `https://dev.fake-label/${cartItemIds[0] ?? "fake"}.pdf` };
   }
 
   const response = await fetch(`${BASE_URL}/api/v2/me/shipment/print`, {
@@ -546,9 +596,9 @@ export async function autoGenerateLabel(orderId: string): Promise<void> {
     const meProducts = items.map((item) => ({
       name: item.productName,
       quantity: item.quantity,
-      unitary_value: parseFloat(item.unitPrice) * item.quantity > 0
+      unitary_value: item.quantity > 0
         ? parseFloat((parseFloat(item.subtotal) / item.quantity).toFixed(2))
-        : 1,
+        : parseFloat(item.unitPrice) || 1,
     }));
 
     // 4. Add to Melhor Envio cart
@@ -589,8 +639,10 @@ export async function autoGenerateLabel(orderId: string): Promise<void> {
     await storage.updateOrderStatus(orderId, "production");
     console.log(`[AutoLabel] Order ${orderId}: label saved, status → production`);
   } catch (err: any) {
-    // Graceful failure — log error but don't rethrow.
-    // Admin can still generate the label manually from the panel.
     console.error(`[AutoLabel] Failed for order ${orderId}:`, err?.message || err);
+    // Persist failure note on the order so admin can see it in the panel
+    try {
+      await storage.createOrderNote({ orderId, content: `[AutoLabel] Falha na geração da etiqueta: ${err?.message || err}`, authorName: "Sistema" });
+    } catch { /* best-effort */ }
   }
 }

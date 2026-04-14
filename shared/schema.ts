@@ -89,6 +89,8 @@ export const products = pgTable("products", {
   active: boolean("active").notNull().default(true),
   seoTitle: text("seo_title"),
   seoDescription: text("seo_description"),
+  mioloTypeId: varchar("miolo_type_id"), // FK to paper_types — set after paperTypes declaration
+  stockQuantity: integer("stock_quantity").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -120,11 +122,18 @@ export const finishings = pgTable("finishings", {
   multiplier: numeric("multiplier", { precision: 6, scale: 4 }).notNull().default("1.0"),
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
+  stockQuantity: integer("stock_quantity").notNull().default(0),
 });
 
 export const insertFinishingSchema = createInsertSchema(finishings).omit({ id: true });
 export type InsertFinishing = z.infer<typeof insertFinishingSchema>;
 export type Finishing = typeof finishings.$inferSelect;
+
+// ── Gráfica: Product Finishings (vínculo produto ↔ acabamento) ──
+export const productFinishings = pgTable("product_finishings", {
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  finishingId: varchar("finishing_id").notNull().references(() => finishings.id, { onDelete: "cascade" }),
+});
 
 // ── Gráfica: Product Variants ──
 export const productVariants = pgTable("product_variants", {
@@ -318,3 +327,105 @@ export const estrategiaSteps = pgTable("estrategia_steps", {
 export const insertEstrategiaStepSchema = createInsertSchema(estrategiaSteps).omit({ id: true, createdAt: true });
 export type InsertEstrategiaStep = z.infer<typeof insertEstrategiaStepSchema>;
 export type EstrategiaStep = typeof estrategiaSteps.$inferSelect;
+
+// ── Gráfica: Wire-o Options ──
+export const wireoOptions = pgTable("wireo_options", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  colorHex: text("color_hex"),
+  sizeMm: integer("size_mm"),
+  priceModifier: numeric("price_modifier", { precision: 10, scale: 2 }).notNull().default("0"),
+  stockQuantity: integer("stock_quantity").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertWireoOptionSchema = createInsertSchema(wireoOptions).omit({ id: true, createdAt: true });
+export type InsertWireoOption = z.infer<typeof insertWireoOptionSchema>;
+export type WireoOption = typeof wireoOptions.$inferSelect;
+
+// ── Gráfica: Addon Categories (Adereços — categorias) ──
+export const addonCategories = pgTable("addon_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  description: text("description"),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAddonCategorySchema = createInsertSchema(addonCategories).omit({ id: true, createdAt: true });
+export type InsertAddonCategory = z.infer<typeof insertAddonCategorySchema>;
+export type AddonCategory = typeof addonCategories.$inferSelect;
+
+// ── Gráfica: Addon Items (Adereços — itens) ──
+export const addonItems = pgTable("addon_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  addonCategoryId: varchar("addon_category_id").notNull().references(() => addonCategories.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  imageUrl: text("image_url"),
+  priceModifier: numeric("price_modifier", { precision: 10, scale: 2 }).notNull().default("0"),
+  stockQuantity: integer("stock_quantity").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAddonItemSchema = createInsertSchema(addonItems).omit({ id: true, createdAt: true });
+export type InsertAddonItem = z.infer<typeof insertAddonItemSchema>;
+export type AddonItem = typeof addonItems.$inferSelect;
+
+// ── Gráfica: Product Addon Items (vínculo produto ↔ item específico de adereço) ──
+export const productAddonItems = pgTable("product_addon_items", {
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  addonItemId: varchar("addon_item_id").notNull().references(() => addonItems.id, { onDelete: "cascade" }),
+});
+
+// ── Gráfica: Product Addon Categories (vínculo produto ↔ categoria de adereço) ──
+export const productAddonCategories = pgTable("product_addon_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  addonCategoryId: varchar("addon_category_id").notNull().references(() => addonCategories.id, { onDelete: "cascade" }),
+  maxAllowed: integer("max_allowed").notNull().default(1),
+});
+
+export const insertProductAddonCategorySchema = createInsertSchema(productAddonCategories).omit({ id: true });
+export type InsertProductAddonCategory = z.infer<typeof insertProductAddonCategorySchema>;
+export type ProductAddonCategory = typeof productAddonCategories.$inferSelect;
+
+// ── Gráfica: Product Discounts (Promoções) ──
+export const productDiscounts = pgTable("product_discounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: varchar("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  discountType: text("discount_type").notNull(), // "percentage" | "fixed"
+  discountValue: numeric("discount_value", { precision: 10, scale: 2 }).notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validTo: timestamp("valid_to").notNull(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertProductDiscountSchema = createInsertSchema(productDiscounts).omit({ id: true, createdAt: true });
+export type InsertProductDiscount = z.infer<typeof insertProductDiscountSchema>;
+export type ProductDiscount = typeof productDiscounts.$inferSelect;
+
+// ── Gráfica: Stock Reservations (Reservas de 10 minutos) ──
+export const stockReservations = pgTable("stock_reservations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cartSessionId: text("cart_session_id").notNull(),
+  orderId: varchar("order_id"), // null até pagamento confirmado
+  entityType: text("entity_type").notNull(), // "cover_protection" | "wireo_option" | "addon_item"
+  entityId: varchar("entity_id").notNull(),
+  quantity: integer("quantity").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  confirmedAt: timestamp("confirmed_at"), // set pelo webhook MP ao aprovar
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertStockReservationSchema = createInsertSchema(stockReservations).omit({ id: true, createdAt: true });
+export type InsertStockReservation = z.infer<typeof insertStockReservationSchema>;
+export type StockReservation = typeof stockReservations.$inferSelect;
